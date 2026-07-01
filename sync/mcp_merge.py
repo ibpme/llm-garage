@@ -157,6 +157,10 @@ def toml_merge(config_path, table, name, entry_path):
     span = _toml_block_span(lines, full_table)
     if span:
         start, end = span
+        existing_body = [l for l in lines[start + 1:end] if l.strip() != ""]
+        new_body = [l for l in block[1:] if l.strip() != ""]
+        if existing_body and existing_body != new_body:
+            print(f"note: [{full_table}] already existed with a different value, replacing it")
         lines[start:end] = block
     else:
         if lines and lines[-1].strip() != "":
