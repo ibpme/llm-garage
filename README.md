@@ -10,11 +10,11 @@ config location.
 ```
 context/GLOBAL.md        canonical global instructions (-> CLAUDE.md / AGENTS.md everywhere)
 skills/<name>/SKILL.md    canonical skills (same SKILL.md format across all four tools)
-subagents/<name>/
+subagents/<name>/         non-canonical -- deferred, not synced into any live tool config (see below)
   spec.yaml               description, tools, per-target model map, optional thinking/max_turns
   prompt.md               the subagent's system prompt body
-prompts/<name>.md         manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
-mcp/<name>/spec.yaml      canonical MCP server spec (stdio command + args)
+prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
+mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args)
 sync/
   generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
@@ -117,12 +117,12 @@ with a copy-file fallback when symlink creation is denied.
 
 ## Adding a new subagent
 
-**Subagent syncing is currently deferred.** The `link_dir_contents ...
-agents` line is commented out in each `sync/sync-<target>.sh` -- skills
-now cover most of what subagents were used for here. `subagents/` and
-`generate.py`'s subagent translation still work (`build/<target>/agents/`
-still gets generated), it just isn't linked into any live tool config.
-Uncomment that line per target to resume.
+**Subagents are non-canonical.** Subagent syncing is currently deferred:
+the `link_dir_contents ... agents` line is commented out in each
+`sync/sync-<target>.sh` -- skills now cover most of what subagents were
+used for here. `subagents/` and `generate.py`'s subagent translation still
+work (`build/<target>/agents/` still gets generated), it just isn't linked
+into any live tool config. Uncomment that line per target to resume.
 
 ```
 mkdir subagents/my-agent
@@ -134,8 +134,8 @@ $EDITOR subagents/my-agent/prompt.md   # system prompt body
 `spec.yaml` is a deliberately small YAML subset (flat keys, plus two
 nested maps -- `model:` and `mcp_tools:`) parsed by a ~30-line hand-rolled
 parser in `generate.py` -- not a general YAML parser. Keep new specs
-within that shape (see `subagents/explore/spec.yaml` for the reference
-example).
+within that shape (see `subagents/subagent-or-skill/spec.yaml` for the
+reference example).
 
 ### Tool names: portable vocab vs. raw MCP names
 
