@@ -47,6 +47,22 @@ git pull
 Editing `context/GLOBAL.md` or `skills/` takes effect immediately since
 those are direct symlinks -- no regeneration step.
 
+## Undoing a sync
+
+```
+./sync/unsync-all.sh
+```
+
+or per tool: `./sync/unsync-claude.sh`, `./sync/unsync-codex.sh`, etc.
+
+This removes every symlink `sync-*.sh` created and restores whatever file
+or directory was backed up in its place (matched by the same
+`.pre-llm-garage.<timestamp>` suffix `sync-*.sh` creates, newest wins). It
+only ever touches symlinks that point into this repo -- anything else at
+that path is left untouched. `unsync-all.sh` also deletes `build/`, since
+it's just generated output. Safe to run repeatedly; a second run is a
+no-op once everything is already unsynced.
+
 ## Per-tool targets
 
 | Tool | Context file | Skills | Subagents | Commands/prompts |
