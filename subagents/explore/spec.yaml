@@ -1,0 +1,8 @@
+name: explore
+description: Fast read-only search agent for locating code. Use it to find files by pattern, grep for symbols or keywords, or answer "where is X defined / which files reference Y." Runs on a cheap/fast model since it only reads and reports.
+tools: read, grep, find, ls, bash
+model:
+  claude: haiku
+  codex: gpt-5.1-codex-mini
+  opencode: anthropic/claude-haiku-4-5
+  pi: anthropic/claude-haiku-4-5
