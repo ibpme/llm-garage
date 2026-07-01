@@ -5,12 +5,14 @@ Run this (or sync-all.sh, which calls it) after editing anything under
 subagents/ or prompts/, then re-run the per-target sync-*.sh scripts to
 re-link. Output goes to build/, which is regenerated from scratch every run.
 """
+import json
 import os
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUBAGENTS_DIR = os.path.join(ROOT, "subagents")
 PROMPTS_DIR = os.path.join(ROOT, "prompts")
+MCP_DIR = os.path.join(ROOT, "mcp")
 BUILD_DIR = os.path.join(ROOT, "build")
 
 # Canonical tool vocabulary (matches pi's native names) mapped to each
@@ -136,6 +138,68 @@ def gen_subagents():
               "\n".join(lines) + "\n")
 
 
+def parse_mcp_spec(path):
+    """Parse mcp/<name>/spec.yaml: flat scalar keys only (name, command,
+    args as a space-separated string). Not a general YAML parser.
+    """
+    spec = {}
+    with open(path) as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            if not line.strip() or line.strip().startswith("#"):
+                continue
+            key, _, val = line.partition(":")
+            spec[key.strip()] = val.strip()
+    return spec
+
+
+def gen_mcp():
+    """Translate mcp/<name>/spec.yaml (a stdio MCP server: command + args)
+    into each target's native fragment. Claude Code and pi share the same
+    mcpServers entry shape, so one JSON fragment covers both. Codex's TOML
+    table is written as bare key/value lines -- the sync script wraps them
+    in a `[mcp_servers.<name>]` header when merging into config.toml, since
+    that header also encodes the server name.
+
+    Optional `auth_env` + `auth_flag` keys let a spec take an API key from
+    the *local* environment at generate time (e.g. CONTEXT7_API_KEY) rather
+    than storing it in the repo -- if the env var isn't set, the flag is
+    silently omitted and the server runs in its unauthenticated/anonymous
+    mode instead of failing. The resolved value only ever lands in
+    build/ (gitignored) and the merged live config file, never in git.
+
+    OpenCode is intentionally not generated here -- it doesn't need one.
+    """
+    if not os.path.isdir(MCP_DIR):
+        return
+    for name in sorted(os.listdir(MCP_DIR)):
+        d = os.path.join(MCP_DIR, name)
+        spec_path = os.path.join(d, "spec.yaml")
+        if not os.path.isfile(spec_path):
+            continue
+
+        spec = parse_mcp_spec(spec_path)
+        command = spec.get("command", "")
+        args = [a for a in spec.get("args", "").split(" ") if a]
+
+        auth_env = spec.get("auth_env", "")
+        auth_flag = spec.get("auth_flag", "")
+        if auth_env and auth_flag:
+            auth_value = os.environ.get(auth_env, "")
+            if auth_value:
+                args = args + [auth_flag, auth_value]
+
+        entry = {"command": command, "args": args}
+        entry_json = json.dumps(entry, indent=2) + "\n"
+        write(os.path.join(BUILD_DIR, "claude", "mcp", f"{name}.json"), entry_json)
+        write(os.path.join(BUILD_DIR, "pi", "mcp", f"{name}.json"), entry_json)
+
+        args_toml = ", ".join(toml_string(a) for a in args)
+        toml_lines = [f"command = {toml_string(command)}", f"args = [{args_toml}]"]
+        write(os.path.join(BUILD_DIR, "codex", "mcp", f"{name}.toml"),
+              "\n".join(toml_lines) + "\n")
+
+
 def gen_prompts():
     if not os.path.isdir(PROMPTS_DIR):
         return
@@ -157,6 +221,7 @@ def main():
         shutil.rmtree(BUILD_DIR)
     gen_subagents()
     gen_prompts()
+    gen_mcp()
     print(f"generated into {BUILD_DIR}")
 
 

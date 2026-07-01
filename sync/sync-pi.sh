@@ -15,4 +15,14 @@ link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
 # pi's "skills" config at ~/.claude/skills and ~/.codex/skills, both of
 # which sync-claude.sh / sync-codex.sh populate.
 
+# MCP servers live in mcp.json, a file pi may also hold project-scoped or
+# pi-specific state in -- merge the key in rather than symlinking the file.
+if [ -d "$REPO_ROOT/build/pi/mcp" ]; then
+  for entry in "$REPO_ROOT/build/pi/mcp"/*.json; do
+    [ -e "$entry" ] || continue
+    name="$(basename "$entry" .json)"
+    python3 "$DIR/mcp_merge.py" json-merge "$TARGET/mcp.json" mcpServers "$name" "$entry"
+  done
+fi
+
 echo "pi: sync complete"

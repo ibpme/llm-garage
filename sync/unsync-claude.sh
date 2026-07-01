@@ -13,4 +13,11 @@ unlink_repo_symlinks "$TARGET/skills"
 unlink_repo_symlinks "$TARGET/agents"
 unlink_repo_symlinks "$TARGET/commands"
 
+if [ -d "$REPO_ROOT/mcp" ]; then
+  for d in "$REPO_ROOT/mcp"/*/; do
+    [ -d "$d" ] || continue
+    python3 "$DIR/mcp_merge.py" json-remove "$HOME/.claude.json" mcpServers "$(basename "$d")"
+  done
+fi
+
 echo "claude: unsync complete"

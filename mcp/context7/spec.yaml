@@ -1,0 +1,10 @@
+name: context7
+command: npx
+args: -y @upstash/context7-mcp
+# Optional: if CONTEXT7_API_KEY is set in the environment sync-all.sh runs
+# in, generate.py appends `--api-key <value>` for higher rate limits.
+# Unset -> runs anonymous (works fine, just lower rate limits). The key
+# itself is never stored in this repo -- only resolved at generate time
+# into build/ (gitignored) and each tool's local, non-repo config file.
+auth_env: CONTEXT7_API_KEY
+auth_flag: --api-key

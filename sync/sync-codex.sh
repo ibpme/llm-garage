@@ -13,4 +13,15 @@ link_dir_contents "$REPO_ROOT/skills" "$TARGET/skills"
 link_dir_contents "$REPO_ROOT/build/codex/agents" "$TARGET/agents"
 link_dir_contents "$REPO_ROOT/build/codex/prompts" "$TARGET/prompts"
 
+# MCP servers live inside config.toml, a file shared with unrelated Codex
+# state (model, project trust list, tui settings) -- merge the table in
+# rather than symlinking the whole file.
+if [ -d "$REPO_ROOT/build/codex/mcp" ]; then
+  for entry in "$REPO_ROOT/build/codex/mcp"/*.toml; do
+    [ -e "$entry" ] || continue
+    name="$(basename "$entry" .toml)"
+    python3 "$DIR/mcp_merge.py" toml-merge "$TARGET/config.toml" mcp_servers "$name" "$entry"
+  done
+fi
+
 echo "codex: sync complete"
