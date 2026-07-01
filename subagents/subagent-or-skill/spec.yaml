@@ -1,0 +1,8 @@
+name: subagent-or-skill
+description: Friendly reminder agent for llm-garage maintainers -- explains how subagents/ is translated per target (tool mapping, sandbox_mode, mcp_tools escape hatch, Codex's lack of per-agent scoping), why subagent syncing is currently deferred here, and when a skill is the better fit instead.
+tools: read, grep
+model:
+  claude: haiku
+  codex: gpt-5.1-codex-mini
+  opencode: anthropic/claude-haiku-4-5
+  pi: anthropic/claude-haiku-4-5

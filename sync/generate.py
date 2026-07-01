@@ -25,35 +25,75 @@ CLAUDE_TOOL_MAP = {
     "grep": "Grep",
     "find": "Glob",
     "ls": "Bash",
+    "ask": "AskUserQuestion",
+    "websearch": "WebSearch",
+    "webfetch": "WebFetch",
+    "task": "Task",
 }
+
+# OpenCode has no allow-list -- it's a per-tool boolean deny-map (default
+# true if unspecified), with its own tool names for a couple of these.
+OPENCODE_TOOL_MAP = {
+    "read": "read",
+    "edit": "edit",
+    "write": "write",
+    "bash": "bash",
+    "grep": "grep",
+    "find": "glob",
+    "ls": "list",
+    "webfetch": "webfetch",
+    "task": "task",
+    # "ask" (Claude's AskUserQuestion) and "websearch" have no OpenCode
+    # built-in equivalent -- left unmapped so opencode_tools() warns
+    # instead of silently granting nothing.
+}
+# All of OpenCode's built-in tools, so unlisted (denied) ones are turned
+# off explicitly rather than left at their true-by-default value.
+OPENCODE_ALL_TOOLS = [
+    "bash", "edit", "glob", "grep", "list", "patch",
+    "read", "task", "todoread", "todowrite", "webfetch", "write",
+]
+
+# Codex has no per-tool allow-list at all -- access is governed by
+# sandbox_mode (read-only / workspace-write / danger-full-access), which
+# blocks filesystem writes regardless of which tool issues them. "bash" is
+# deliberately excluded here: read-only sandbox still runs shell commands
+# (e.g. grep/find), it just denies writes -- so bash alone isn't a write
+# signal, only "write"/"edit" are.
+CODEX_WRITE_TOOLS = {"write", "edit"}
+
+
+NESTED_SPEC_KEYS = ("model", "mcp_tools")
 
 
 def parse_spec(path):
     """Parse the constrained YAML subset used by subagents/*/spec.yaml:
-    flat top-level scalars, plus one nested 'model:' mapping. Not a general
-    YAML parser -- keep spec.yaml within this shape.
+    flat top-level scalars, plus nested mappings under 'model:' (per-target
+    model id) and 'mcp_tools:' (per-target raw MCP tool names/wildcards,
+    since those aren't portable across targets -- see gen_subagents).
+    Not a general YAML parser -- keep spec.yaml within this shape.
     """
     spec = {}
-    model = {}
-    in_model = False
+    nested = {k: {} for k in NESTED_SPEC_KEYS}
+    current = None
     with open(path) as f:
         for raw in f:
             line = raw.rstrip("\n")
             if not line.strip() or line.strip().startswith("#"):
                 continue
-            if line.startswith((" ", "\t")) and in_model:
+            if line.startswith((" ", "\t")) and current:
                 key, _, val = line.strip().partition(":")
-                model[key.strip()] = val.strip()
+                nested[current][key.strip()] = val.strip()
                 continue
-            in_model = False
+            current = None
             key, _, val = line.partition(":")
             key = key.strip()
             val = val.strip()
-            if key == "model" and val == "":
-                in_model = True
+            if key in NESTED_SPEC_KEYS and val == "":
+                current = key
                 continue
             spec[key] = val
-    spec["model"] = model
+    spec.update(nested)
     return spec
 
 
@@ -67,10 +107,36 @@ def claude_tools(tools_csv):
     names = [t.strip() for t in tools_csv.split(",") if t.strip()]
     mapped = []
     for t in names:
+        if t not in CLAUDE_TOOL_MAP:
+            print(f"warning: tool '{t}' has no claude mapping, passing through as-is")
         m = CLAUDE_TOOL_MAP.get(t, t)
         if m not in mapped:
             mapped.append(m)
     return ", ".join(mapped)
+
+
+def opencode_tools(tools_csv):
+    """Render an OpenCode `tools:` deny-map block from the canonical CSV.
+    Unknown canonical names are skipped (with a warning) rather than
+    guessed at, since a wrong tool name here silently fails open.
+    """
+    names = [t.strip() for t in tools_csv.split(",") if t.strip()]
+    enabled = set()
+    for t in names:
+        m = OPENCODE_TOOL_MAP.get(t)
+        if m is None:
+            print(f"warning: tool '{t}' has no opencode mapping, omitted")
+            continue
+        enabled.add(m)
+    return [f"  {t}: {'true' if t in enabled else 'false'}" for t in OPENCODE_ALL_TOOLS]
+
+
+def codex_sandbox_mode(tools_csv):
+    """Codex has no per-tool allow-list -- translate intent (does this
+    subagent need to write?) into a sandbox_mode instead.
+    """
+    names = {t.strip() for t in tools_csv.split(",") if t.strip()}
+    return "workspace-write" if names & CODEX_WRITE_TOOLS else "read-only"
 
 
 def toml_string(s):
@@ -96,11 +162,20 @@ def gen_subagents():
         model = spec.get("model", {})
         description = spec.get("description", "")
         tools = spec.get("tools", "")
+        # Raw, per-target tool names/wildcards (mainly for MCP tools, whose
+        # names aren't portable: Claude wants "mcp__server__tool", OpenCode
+        # wants "server_tool"). Bypasses all translation -- see parse_spec.
+        mcp_tools = spec.get("mcp_tools", {})
 
         # Claude Code: .claude/agents/<name>.md
         fm = ["---", f"name: {name}", f"description: {description}"]
+        claude_tool_parts = []
         if tools:
-            fm.append(f"tools: {claude_tools(tools)}")
+            claude_tool_parts.append(claude_tools(tools))
+        if mcp_tools.get("claude"):
+            claude_tool_parts.append(mcp_tools["claude"])
+        if claude_tool_parts:
+            fm.append(f"tools: {', '.join(claude_tool_parts)}")
         if model.get("claude"):
             fm.append(f"model: {model['claude']}")
         fm.append("---")
@@ -111,14 +186,20 @@ def gen_subagents():
         fm = ["---", f"description: {description}"]
         if model.get("opencode"):
             fm.append(f"model: {model['opencode']}")
+        opencode_mcp_raw = [t.strip() for t in mcp_tools.get("opencode", "").split(",") if t.strip()]
+        if tools or opencode_mcp_raw:
+            fm.append("tools:")
+            fm.extend(opencode_tools(tools))
+            fm.extend(f"  {t}: true" for t in opencode_mcp_raw)
         fm.append("---")
         write(os.path.join(BUILD_DIR, "opencode", "agents", f"{name}.md"),
               "\n".join(fm) + "\n\n" + prompt)
 
         # pi: agents/<name>.md (pi's native tool/model vocabulary, pass through)
         fm = ["---", f"description: {description}"]
-        if tools:
-            fm.append(f"tools: {tools}")
+        pi_tool_parts = [p for p in (tools, mcp_tools.get("pi", "")) if p]
+        if pi_tool_parts:
+            fm.append(f"tools: {', '.join(pi_tool_parts)}")
         if model.get("pi"):
             fm.append(f"model: {model['pi']}")
         if spec.get("thinking"):
@@ -129,10 +210,19 @@ def gen_subagents():
         write(os.path.join(BUILD_DIR, "pi", "agents", f"{name}.md"),
               "\n".join(fm) + "\n\n" + prompt)
 
-        # Codex CLI: agents/<name>.toml
+        # Codex CLI: agents/<name>.toml. Codex has no per-agent tool or MCP
+        # scoping at all (confirmed against its agent TOML schema: only
+        # name/description/model_reasoning_effort/sandbox_mode/
+        # developer_instructions -- MCP servers are wired up globally in
+        # config.toml, not per role), so mcp_tools.codex can't be honored.
+        if mcp_tools.get("codex"):
+            print(f"warning: subagent '{name}' sets mcp_tools.codex, but "
+                  "Codex has no per-agent tool/MCP scoping -- ignored")
         lines = [f'name = "{name}"', f"description = {toml_string(description)}"]
         if model.get("codex"):
             lines.append(f'model = "{model["codex"]}"')
+        if tools:
+            lines.append(f'sandbox_mode = "{codex_sandbox_mode(tools)}"')
         lines.append(f"developer_instructions = {toml_string(prompt)}")
         write(os.path.join(BUILD_DIR, "codex", "agents", f"{name}.toml"),
               "\n".join(lines) + "\n")

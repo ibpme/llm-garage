@@ -117,6 +117,13 @@ with a copy-file fallback when symlink creation is denied.
 
 ## Adding a new subagent
 
+**Subagent syncing is currently deferred.** The `link_dir_contents ...
+agents` line is commented out in each `sync/sync-<target>.sh` -- skills
+now cover most of what subagents were used for here. `subagents/` and
+`generate.py`'s subagent translation still work (`build/<target>/agents/`
+still gets generated), it just isn't linked into any live tool config.
+Uncomment that line per target to resume.
+
 ```
 mkdir subagents/my-agent
 $EDITOR subagents/my-agent/spec.yaml   # description, tools, model per target
@@ -124,10 +131,44 @@ $EDITOR subagents/my-agent/prompt.md   # system prompt body
 ./sync/sync-all.sh
 ```
 
-`spec.yaml` is a deliberately small YAML subset (flat keys + one nested
-`model:` map) parsed by a ~30-line hand-rolled parser in `generate.py` --
-not a general YAML parser. Keep new specs within that shape (see
-`subagents/explore/spec.yaml` for the reference example).
+`spec.yaml` is a deliberately small YAML subset (flat keys, plus two
+nested maps -- `model:` and `mcp_tools:`) parsed by a ~30-line hand-rolled
+parser in `generate.py` -- not a general YAML parser. Keep new specs
+within that shape (see `subagents/explore/spec.yaml` for the reference
+example).
+
+### Tool names: portable vocab vs. raw MCP names
+
+`tools:` (a flat CSV, e.g. `read, grep, bash`) uses a small canonical
+vocabulary that `generate.py` translates per target -- `CLAUDE_TOOL_MAP`
+and `OPENCODE_TOOL_MAP` at the top of the file. Codex has no per-tool
+allow-list at all, so `tools:` is translated into a `sandbox_mode`
+instead (`workspace-write` if `write`/`edit` is present, else
+`read-only` -- see `codex_sandbox_mode()`; `bash` alone doesn't force
+`workspace-write`, since a read-only sandbox still runs shell commands
+for things like grep/find, it just blocks writes).
+
+MCP tool names aren't portable across targets (Claude wants
+`mcp__<server>__<tool>` or a `mcp__<server>__*` wildcard; OpenCode wants
+`<server>_<tool>` or `<server>_*`), so they can't go through the
+canonical vocab. Use the optional `mcp_tools:` nested map instead, with
+one raw, target-specific CSV per key:
+
+```yaml
+mcp_tools:
+  claude: mcp__context7__query-docs, mcp__context7__resolve-library-id
+  opencode: context7_*
+  pi: mcp__context7__query-docs
+```
+
+These bypass all translation and get appended straight into each
+target's tool declaration. **Codex has no per-agent tool or MCP scoping
+at all** -- its custom-agent TOML schema is only
+`name`/`description`/`model_reasoning_effort`/`sandbox_mode`/
+`developer_instructions`; MCP servers are wired up globally in
+`~/.codex/config.toml`, not per role. A `mcp_tools.codex` key is
+accepted but ignored, with a warning at generate time -- there's no
+native mechanism to honor it.
 
 ## Adding a new MCP server
 
