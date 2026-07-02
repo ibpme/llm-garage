@@ -12,17 +12,34 @@ living document as you go.
 ## Setup (once, at the start)
 
 1. Confirm the topic in one sentence and reflect it back.
-2. Confirm the output document:
-   - **Default:** `./notes/<slug>.md` in the current working directory
-     (`<slug>` = a short kebab-case name derived from the topic).
-   - Let the user override the path, filename, and format.
-   - Default format is Markdown. Other formats (html/docx/pdf) are export-only,
-     on request — see [Exporting](#exporting-on-request-only).
-3. Before creating anything: if the target file already exists, **do not
-   overwrite it** — read it and offer to resume that brainstorm from its
-   current state. Otherwise create the `notes/` directory if needed and start
-   the document from the [template](#document-template), even if mostly empty.
-   It is a living artifact from the first exchange.
+2. Decide where the living document goes based on the capabilities available to
+   you — see [Where the living document lives](#where-the-living-document-lives).
+   In a filesystem environment the **default** is `./notes/<slug>.md`
+   (`<slug>` = a short kebab-case name derived from the topic); let the user
+   override the location, filename, and format. Default format is Markdown;
+   other formats (html/docx/pdf) are export-only, on request — see
+   [Exporting](#exporting-on-request-only).
+3. Before creating a new document, check for an existing one for this topic (a
+   prior notes file or artifact) and **do not overwrite it** — read it and offer
+   to resume from its current state. Otherwise create it (making the `notes/`
+   directory first if you're writing to the filesystem) from the
+   [template](#document-template), even if mostly empty. It is a living artifact
+   from the first exchange.
+
+## Where the living document lives
+
+Choose the medium from what the environment supports — check your available
+capabilities, don't hard-code:
+
+1. **Artifacts available** (e.g. Claude web/desktop): maintain the document as a
+   single Markdown artifact and update that same artifact in place after each
+   exchange — do not spawn a new artifact each time.
+2. **Filesystem write + working directory** (coding agents): use
+   `./notes/<slug>.md` as in Setup.
+3. **Neither** (plain chat): keep the document inline in the conversation and
+   re-post the current full version whenever it changes.
+
+The content and template are identical regardless of medium.
 
 ## The loop
 
@@ -56,8 +73,9 @@ into one thread) deliberately, and say which you're doing.
 
 The document is the running record of the brainstorm, not a final report.
 
-- **Update continuously** — after each meaningful exchange, edit the file so it
-  always reflects the current state of thinking, open questions, and decisions.
+- **Update continuously** — after each meaningful exchange, update the document
+  (file, artifact, or inline — see above) so it always reflects the current
+  state of thinking, open questions, and decisions.
 - **Never auto-finalize.** Do not declare the document "done" or produce a
   distinct "final" version on your own. Keep it in the living, in-progress form
   unless the user explicitly asks you to finalize or clean it up.
@@ -128,13 +146,14 @@ block the brainstorm on export tooling.
 
 - **Explicit-trigger-only.** Only run when the user says "brainstorm" or runs
   `/brainstorm`; never self-activate from a merely vague prompt.
-- **Never clobber an existing doc.** If the target file already exists, read it
-  and resume from its current state instead of overwriting — it may be a prior
-  brainstorm you didn't create.
+- **Never clobber an existing doc.** If a document for this topic already exists
+  (notes file or artifact), read it and resume from its current state instead of
+  overwriting — it may be a prior brainstorm you didn't create.
 - **Resume on return.** When the user asks to continue an earlier brainstorm,
-  load the existing notes doc first and pick up from its current state rather
+  load the existing document first and pick up from its current state rather
   than starting a new one.
-- **Re-anchor from the doc.** Long sessions may drop these instructions from
-  context. The notes doc is the durable record — re-read it to recover the
-  current state, then keep updating it in place and never auto-finalize.
-- **Create `notes/` if missing** before writing the file.
+- **Re-anchor from the document.** Long sessions may drop these instructions
+  from context. The living document is the durable record — re-read it to
+  recover the current state, then keep updating it in place and never
+  auto-finalize.
+- **Create `notes/` if missing** before writing to the filesystem.
