@@ -13,6 +13,19 @@ require_macos_or_linux() {
   esac
 }
 
+# has_flag FLAG ARGS...
+# True if FLAG appears among ARGS. Used to gate optional, non-default
+# behavior (e.g. --with-mcp) behind an explicit opt-in on the command line.
+has_flag() {
+  local flag="$1"
+  shift
+  local arg
+  for arg in "$@"; do
+    [ "$arg" = "$flag" ] && return 0
+  done
+  return 1
+}
+
 # link_one SRC DEST
 # Symlinks DEST -> SRC. If DEST already exists as something else, it is
 # renamed aside with a timestamp suffix first -- never silently clobbered.

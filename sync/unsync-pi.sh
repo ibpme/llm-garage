@@ -12,7 +12,9 @@ unlink_one "$TARGET/AGENTS.md"
 unlink_repo_symlinks "$TARGET/agents"
 unlink_repo_symlinks "$TARGET/prompts"
 
-if [ -d "$REPO_ROOT/mcp" ]; then
+# Only reverses MCP entries if this repo was synced with --with-mcp in
+# the first place -- see sync-pi.sh.
+if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/mcp" ]; then
   for d in "$REPO_ROOT/mcp"/*/; do
     [ -d "$d" ] || continue
     python3 "$DIR/mcp_merge.py" json-remove "$TARGET/mcp.json" mcpServers "$(basename "$d")"

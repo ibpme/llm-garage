@@ -16,10 +16,12 @@ link_dir_contents "$REPO_ROOT/skills" "$TARGET/skills"
 # link_dir_contents "$REPO_ROOT/build/claude/agents" "$TARGET/agents"
 link_dir_contents "$REPO_ROOT/build/claude/commands" "$TARGET/commands"
 
-# MCP servers live inside ~/.claude.json, a file shared with unrelated
-# Claude Code state (auth, projects, other servers) -- merge the key in
-# rather than symlinking the whole file.
-if [ -d "$REPO_ROOT/build/claude/mcp" ]; then
+# MCP servers are optional and off by default -- setting them up is a
+# coding agent's own responsibility, not this repo's. Pass --with-mcp to
+# also merge this repo's mcp/ specs into ~/.claude.json (a file shared
+# with unrelated Claude Code state: auth, projects, other servers -- so
+# the key is merged in rather than symlinking the whole file).
+if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/build/claude/mcp" ]; then
   for entry in "$REPO_ROOT/build/claude/mcp"/*.json; do
     [ -e "$entry" ] || continue
     name="$(basename "$entry" .json)"

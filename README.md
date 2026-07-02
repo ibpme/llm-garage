@@ -14,11 +14,11 @@ subagents/<name>/         non-canonical -- deferred, not synced into any live to
   spec.yaml               description, tools, per-target model map, optional thinking/max_turns
   prompt.md               the subagent's system prompt body
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
-mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args)
+mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args) -- opt-in, see below
 sync/
   generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
-  mcp_merge.py            merges/removes one MCP server entry into a tool's native config file
+  mcp_merge.py            merges/removes one MCP server entry into a tool's native config file (--with-mcp only)
   refresh-context7.py     pulls Context7's skill/rule content from upstream, diffs against the repo
   sync-claude.sh
   sync-codex.sh
@@ -39,23 +39,27 @@ Prompts/commands are close enough across tools (same `$ARGUMENTS`/`$1`
 placeholder body) that they're passed through with only minor frontmatter
 differences.
 
-MCP servers (`mcp/`) go a step further: their native config files
-(`~/.claude.json`, `~/.codex/config.toml`, `~/.pi/agent/mcp.json`) also hold
-each tool's own unrelated state -- auth, project lists, other servers not
-managed by this repo -- so even the *generated* fragment can't be
-symlinked into place. Instead `sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh`
-call `mcp_merge.py` to upsert just that one server's entry/table, leaving
-the rest of the file untouched (with a one-time backup on first write, see
-`mcp_merge.py`'s `_backup_once`). `unsync-*.sh` reverses this by deleting
-just that entry. OpenCode isn't included in `mcp/` sync at all -- MCP
-servers there are configured through its own plugin ecosystem.
+MCP servers (`mcp/`) are **opt-in and off by default** -- setting up MCP
+servers is a coding agent's own responsibility, not this repo's, so
+`sync-*.sh` skip them unless you pass `--with-mcp`. When you do opt in,
+their native config files (`~/.claude.json`, `~/.codex/config.toml`,
+`~/.pi/agent/mcp.json`) also hold each tool's own unrelated state -- auth,
+project lists, other servers not managed by this repo -- so even the
+*generated* fragment can't be symlinked into place. Instead
+`sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh` call `mcp_merge.py` to upsert
+just that one server's entry/table, leaving the rest of the file untouched
+(with a one-time backup on first write, see `mcp_merge.py`'s
+`_backup_once`). `unsync-*.sh --with-mcp` reverses this by deleting just
+that entry. OpenCode isn't included in `mcp/` sync at all -- MCP servers
+there are configured through its own plugin ecosystem.
 
 Practical effect: after editing anything under `subagents/`, `prompts/`,
 or `mcp/`, re-run sync (regeneration isn't automatic on `git pull`):
 
 ```
 git pull
-./sync/sync-all.sh
+./sync/sync-all.sh              # skills, memory, commands/prompts, subagents
+./sync/sync-all.sh --with-mcp   # ...plus MCP servers under mcp/
 ```
 
 Editing `context/GLOBAL.md` or `skills/` takes effect immediately since
@@ -77,15 +81,16 @@ that path is left untouched. `unsync-all.sh` also deletes `build/`, since
 it's just generated output. Safe to run repeatedly; a second run is a
 no-op once everything is already unsynced.
 
-MCP server entries aren't symlinks, so they're reversed separately: each
-`unsync-*.sh` also removes this repo's entries from the relevant native
-config file (`~/.claude.json`, `~/.codex/config.toml`,
-`~/.pi/agent/mcp.json`) via `mcp_merge.py`, leaving everything else in
-those files untouched.
+MCP server entries aren't symlinks, so they're reversed separately: run
+`unsync-*.sh --with-mcp` (matching however you synced) to also remove this
+repo's entries from the relevant native config file (`~/.claude.json`,
+`~/.codex/config.toml`, `~/.pi/agent/mcp.json`) via `mcp_merge.py`, leaving
+everything else in those files untouched. Without `--with-mcp`, unsync
+leaves MCP entries alone.
 
 ## Per-tool targets
 
-| Tool | Context file | Skills | Subagents | Commands/prompts | MCP servers |
+| Tool | Context file | Skills | Subagents | Commands/prompts | MCP servers (`--with-mcp` only) |
 |---|---|---|---|---|---|
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/<name>/` | `~/.claude/agents/<name>.md` | `~/.claude/commands/<name>.md` | merged into `~/.claude.json`'s `mcpServers` |
 | Codex CLI | `~/.codex/AGENTS.md` | `~/.codex/skills/<name>/` | `~/.codex/agents/<name>.toml` | `~/.codex/prompts/<name>.md` (deprecated upstream -- prefer skills for anything auto-triggered) | merged into `~/.codex/config.toml`'s `[mcp_servers.<name>]` |
@@ -95,9 +100,9 @@ those files untouched.
 ## Setup on a new machine
 
 ```
-git clone <this repo> ~/Documents/Code/jv-llm-garage
-cd ~/Documents/Code/jv-llm-garage
-./sync/sync-all.sh
+git clone <this repo> ~/Documents/Code/llm-garage
+cd ~/Documents/Code/llm-garage
+./sync/sync-all.sh              # skip mcp/ (opt in with --with-mcp, see below)
 ```
 
 Any existing file at a target path is renamed aside as
@@ -172,10 +177,14 @@ native mechanism to honor it.
 
 ## Adding a new MCP server
 
+**MCP servers are opt-in.** Setting up MCP servers is a coding agent's own
+responsibility, not this repo's -- `sync-*.sh` never touch them unless you
+explicitly pass `--with-mcp`.
+
 ```
 mkdir mcp/my-server
 $EDITOR mcp/my-server/spec.yaml   # name, command, args (stdio only)
-./sync/sync-all.sh
+./sync/sync-all.sh --with-mcp
 ```
 
 `spec.yaml` only supports stdio servers (`command` + a space-separated
