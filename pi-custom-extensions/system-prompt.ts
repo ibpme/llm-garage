@@ -53,6 +53,7 @@ async function showScrollableText(
 	await ctx.ui.custom((_tui, theme, _kb, done) => {
 		let allLines: string[] = [];
 		let offset = 0;
+		let pendingG = false;
 
 		const pad = (s: string, len: number) => {
 			const vis = visibleWidth(s);
@@ -89,7 +90,7 @@ async function showScrollableText(
 					`${offset + 1}-${Math.min(offset + VIEWPORT_LINES, allLines.length)}/${allLines.length}`,
 				);
 			}
-			footerParts.push("↑↓ scroll • PageUp/PageDown • Home/End • Esc/q close");
+			footerParts.push("↑↓/jk scroll • PageUp/PageDown • gg/G home/end • Esc/q close");
 			const footer = " " + theme.fg("dim", footerParts.join("  "));
 			lines.push(theme.fg("border", "│") + pad(footer, innerW) + theme.fg("border", "│"));
 
@@ -107,18 +108,41 @@ async function showScrollableText(
 					done(undefined);
 					return;
 				}
-				if (matchesKey(data, "up")) {
+
+				// Vim-style gg (go to top)
+				if (data === "g") {
+					if (pendingG) {
+						offset = 0;
+						pendingG = false;
+					} else {
+						pendingG = true;
+						return;
+					}
+				} else if (data === "G") {
+					offset = maxOffset;
+					pendingG = false;
+				} else if (data === "k" || matchesKey(data, "up")) {
 					offset = Math.max(0, offset - 1);
-				} else if (matchesKey(data, "down")) {
+					pendingG = false;
+				} else if (data === "j" || matchesKey(data, "down")) {
 					offset = Math.min(maxOffset, offset + 1);
-				} else if (matchesKey(data, "pageup")) {
-					offset = Math.max(0, offset - VIEWPORT_LINES);
-				} else if (matchesKey(data, "pagedown")) {
-					offset = Math.min(maxOffset, offset + VIEWPORT_LINES);
+					pendingG = false;
+				} else if (matchesKey(data, "pageup") || data === "\x15") {
+					// Ctrl+u = half page up
+					offset = Math.max(0, offset - Math.floor(VIEWPORT_LINES / 2));
+					pendingG = false;
+				} else if (matchesKey(data, "pagedown") || data === "\x04") {
+					// Ctrl+d = half page down
+					offset = Math.min(maxOffset, offset + Math.floor(VIEWPORT_LINES / 2));
+					pendingG = false;
 				} else if (matchesKey(data, "home")) {
 					offset = 0;
+					pendingG = false;
 				} else if (matchesKey(data, "end")) {
 					offset = maxOffset;
+					pendingG = false;
+				} else {
+					pendingG = false;
 				}
 			},
 		};
