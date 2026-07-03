@@ -37,8 +37,10 @@ export default function (pi: ExtensionAPI) {
   function statusLabel(ctx: ExtensionContext): string {
     const { theme } = ctx.ui;
     return mode === "safe"
-      ? theme.bold(theme.fg("success", "⏸ SAFE"))
-      : theme.bold(theme.fg("error", "⏵⏵ YOLO"));
+      ? theme.bold(theme.fg("success", "⏸ SAFE")) +
+          theme.fg("text", "\t(shift+tab to cycle)")
+      : theme.bold(theme.fg("error", "⏵⏵ YOLO")) +
+          theme.fg("text", "\t(shift+tab to cycle)");
   }
 
   function applyStatus(ctx: ExtensionContext) {
@@ -63,12 +65,15 @@ export default function (pi: ExtensionAPI) {
 
     mode = next;
     applyStatus(ctx);
-    ctx.ui.notify(
-      mode === "safe"
-        ? "Safe mode on: write, edit, and bash are unavailable; grep, find, and ls are enabled"
-        : "Yolo mode on: full tool access restored",
-      mode === "safe" ? "info" : "warning",
-    );
+    const NOTIFY = false;
+    if (NOTIFY) {
+      ctx.ui.notify(
+        mode === "safe"
+          ? "Safe mode on: write, edit, and bash are unavailable; grep, find, and ls are enabled"
+          : "Yolo mode on: full tool access restored",
+        mode === "safe" ? "info" : "warning",
+      );
+    }
   }
 
   pi.registerCommand("safe", {
