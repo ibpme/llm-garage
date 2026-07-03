@@ -49,7 +49,7 @@ Run a genuine dialogue, not an interview script. Each turn:
    multiple reasonable readings, surface it and ask. Do not silently pick an
    interpretation and move on.
 2. **Ask well.** If a question tool is available (e.g. `AskUserQuestion`,
-   `ask_user_input`, or any interactive prompt tool), use it for crisp,
+   `ask_user_input`,`question` or any interactive prompt tool), use it for crisp,
    scoped clarifications with concrete options. If no such tool exists, or the
    user wants to go deep on something, ask open-ended questions instead.
 3. **Be critical and objective.** Challenge assumptions, offer counterpoints,
@@ -89,24 +89,31 @@ The document is the running record of the brainstorm, not a final report.
 _Brainstorm in progress — last updated <date/time>_
 
 ## Intent
+
 <What the user is trying to figure out, do, or learn — in their words, sharpened.>
 
 ## Current thinking
+
 <The best current articulation of the idea/plan/answer, evolving over time.>
 
 ## Open questions
+
 - [ ] <Unresolved question or ambiguity>
 
 ## Options & trade-offs
+
 <Approaches considered, with pros/cons. Note which are favored and why.>
 
 ## Decisions
+
 <Things that have been settled, with the reasoning behind them.>
 
 ## Research & sources
+
 <Findings from external research, each with a citation/link.>
 
 ## Next steps
+
 <Concrete next actions or threads to pursue.>
 ```
 
@@ -126,21 +133,14 @@ rely only on what you already know.
 - Bring findings back as feedback: correct misconceptions, surface prior art,
   add data points, and challenge or support the user's direction.
 - **Always cite sources** in the document's "Research & sources" section (title
-  + link).
+  - link).
 - **Degrade gracefully:** if no research tools are available, say so briefly and
   continue with reasoning and questioning. Only use tools that exist.
 
 ## Exporting (on request only)
 
-Default output stays Markdown. If the user asks for another format
-(html/docx/pdf), convert with `pandoc`, e.g.:
-
-```bash
-pandoc notes/<slug>.md -o notes/<slug>.pdf
-```
-
-If `pandoc` is not installed, tell the user and keep the Markdown file. Do not
-block the brainstorm on export tooling.
+Default output stays Markdown. User may ask for another format
+(html/docx/pdf).
 
 ## Gotchas
 
