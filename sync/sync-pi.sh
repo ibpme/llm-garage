@@ -22,6 +22,10 @@ link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
 # (individual file links, so pi-specific local extensions stay untouched).
 link_dir_contents "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
+# Symlink this repo's keybindings.json override (unlike extensions, pi reads
+# this as a single whole file, not a directory of entries).
+link_one "$REPO_ROOT/pi-custom-keybinds/keybindings.json" "$TARGET/keybindings.json"
+
 # MCP servers are optional and off by default -- setting them up is a
 # coding agent's own responsibility, not this repo's. Pass --with-mcp to
 # also merge this repo's mcp/ specs into mcp.json (a file pi may also hold

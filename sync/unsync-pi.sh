@@ -12,6 +12,7 @@ unlink_one "$TARGET/AGENTS.md"
 unlink_repo_symlinks "$TARGET/agents"
 unlink_repo_symlinks "$TARGET/prompts"
 unlink_repo_symlinks "$TARGET/extensions"
+unlink_one "$TARGET/keybindings.json"
 
 # Only reverses MCP entries if this repo was synced with --with-mcp in
 # the first place -- see sync-pi.sh.

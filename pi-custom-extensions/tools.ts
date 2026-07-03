@@ -83,8 +83,11 @@ export default function toolsExtension(pi: ExtensionAPI) {
         return;
       }
 
-      // Refresh tool list
+      // Refresh tool list and resync enabled state with the ground truth,
+      // in case another extension (e.g. a mode toggle) changed active
+      // tools out-of-band since our last session_start/session_tree sync.
       allTools = pi.getAllTools();
+      enabledTools = new Set(pi.getActiveTools());
 
       await ctx.ui.custom((tui, theme, _kb, done) => {
         // Build settings items for each tool
@@ -135,6 +138,14 @@ export default function toolsExtension(pi: ExtensionAPI) {
             container.invalidate();
           },
           handleInput(data: string) {
+            // Vim keybindings
+            switch (data) {
+              case "j": data = "\x1b[B"; break; // down
+              case "k": data = "\x1b[A"; break; // up
+              case "h": data = "\x1b"; break;   // escape / close
+              case "l": data = " "; break;      // space / activate
+              case "q": data = "\x1b"; break;   // escape / close
+            }
             settingsList.handleInput?.(data);
             tui.requestRender();
           },
