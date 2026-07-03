@@ -14,7 +14,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-const BAR_WIDTH = 50;
+const BAR_WIDTH = 40;
 
 function formatTokens(count: number): string {
   if (count < 1000) return `${count}`;

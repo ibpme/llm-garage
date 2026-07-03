@@ -1,0 +1,21 @@
+{
+  "name": "llm-garage",
+  "version": "1.0.0",
+  "description": "Personal, source-of-truth repo for skills, subagents, prompts/commands, and global context, shared across multiple AI coding agents (Claude Code, OpenAI Codex CLI, OpenCode, pi). Edit here, then sync out to each tool's native config location.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ibpme/llm-garage.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ibpme/llm-garage/issues"
+  },
+  "homepage": "https://github.com/ibpme/llm-garage#readme",
+  "private": "true"
+}
