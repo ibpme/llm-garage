@@ -18,6 +18,10 @@ link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
 # pi's "skills" config at ~/.claude/skills and ~/.codex/skills, both of
 # which sync-claude.sh / sync-codex.sh populate.
 
+# Symlink custom extensions from this repo into pi's extensions dir
+# (individual file links, so pi-specific local extensions stay untouched).
+link_dir_contents "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
+
 # MCP servers are optional and off by default -- setting them up is a
 # coding agent's own responsibility, not this repo's. Pass --with-mcp to
 # also merge this repo's mcp/ specs into mcp.json (a file pi may also hold
