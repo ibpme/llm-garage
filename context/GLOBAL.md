@@ -1,6 +1,6 @@
-# Global context
+# User Agent Prerogative
 
-Rules that apply to every project, regardless of which coding agent is driving.
+Rules and prerogative that apply to every project, regardless of which coding agent is driving.
 
 ## Editing agent garage config (memory, skills, commands)
 
