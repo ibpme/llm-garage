@@ -13,6 +13,7 @@
  * Mode is in-memory only and always starts as yolo on a fresh session.
  */
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -23,6 +24,14 @@ type Mode = "yolo" | "safe";
 const BLOCKED_TOOLS = new Set(["write", "edit", "bash"]);
 const SAFE_EXTRA_TOOLS = new Set(["grep", "find", "ls"]);
 const STATUS_ID = "mode";
+const SAFE_MODE_CUSTOM_TYPE = "safe-mode-context";
+
+function safeModeReminder(): string {
+  return `[SAFE MODE ACTIVE]
+The write, edit, and bash tools are not currently in your active toolset — they have been removed, not just blocked. Do not attempt to call them; retrying will not surface new information.
+grep, find, and ls are available in their place for read-only search and inspection.
+If a change is needed, describe what you would do and ask the user to run /yolo, /auto, or press shift+tab to restore full tool access — you cannot exit safe mode yourself.`;
+}
 
 export default function (pi: ExtensionAPI) {
   let mode: Mode = "yolo";
@@ -117,5 +126,33 @@ export default function (pi: ExtensionAPI) {
       };
     }
     return undefined;
+  });
+
+  // Proactive signal: unlike tool_call's block+reason (only fires after
+  // the model has already tried and failed a blocked call), this runs on
+  // every LLM call — including mid-turn, e.g. right after shift+tab flips
+  // mode while the agent loop is still going — so the model has standing
+  // knowledge that write/edit/bash are gone before it ever attempts them.
+  // Never persisted to session history (context hook output isn't written
+  // back), so the filter below is defensive, not load-bearing.
+  pi.on("context", async (event) => {
+    const withoutStale = event.messages.filter(
+      (m) =>
+        (m as AgentMessage & { customType?: string }).customType !==
+        SAFE_MODE_CUSTOM_TYPE,
+    );
+    if (mode !== "safe") return { messages: withoutStale };
+    return {
+      messages: [
+        ...withoutStale,
+        {
+          role: "custom",
+          customType: SAFE_MODE_CUSTOM_TYPE,
+          content: safeModeReminder(),
+          display: false,
+          timestamp: Date.now(),
+        },
+      ],
+    };
   });
 }
