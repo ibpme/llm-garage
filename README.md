@@ -15,10 +15,12 @@ subagents/<name>/         non-canonical -- deferred, not synced into any live to
   prompt.md               the subagent's system prompt body
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
 mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args) -- opt-in, see below
+pi-custom-extensions/      pi-specific TypeScript extensions (hotkeyed mode toggle, status line, etc.)
+pi-custom-keybinds/        pi-specific keybindings.json override
 sync/
   generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
-  config_merge.py         merges/removes config entries (MCP servers, top-level keys) in tool native config files (--with-mcp only)
+  config_merge.py         merges/removes config entries (MCP servers, top-level JSON keys) in tool native config files
   refresh-context7.py     pulls Context7's skill/rule content from upstream, diffs against the repo
   sync-claude.sh
   sync-codex.sh
@@ -49,7 +51,9 @@ project lists, other servers not managed by this repo -- so even the
 `sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh` call `config_merge.py` to upsert
 just that one server's entry/table, leaving the rest of the file untouched
 (with a one-time backup on first write, see `config_merge.py`'s
-`_backup_once`). `unsync-*.sh --with-mcp` reverses this by deleting just
+`_backup_once`). `sync-pi.sh` also uses it to set the `skills` key in
+`~/.pi/agent/settings.json` so pi shares the same skill directories as
+Claude Code and Codex. `unsync-*.sh --with-mcp` reverses this by deleting just
 that entry. OpenCode isn't included in `mcp/` sync at all -- MCP servers
 there are configured through its own plugin ecosystem.
 
@@ -86,7 +90,8 @@ MCP server entries aren't symlinks, so they're reversed separately: run
 repo's entries from the relevant native config file (`~/.claude.json`,
 `~/.codex/config.toml`, `~/.pi/agent/mcp.json`) via `config_merge.py`, leaving
 everything else in those files untouched. Without `--with-mcp`, unsync
-leaves MCP entries alone.
+leaves MCP entries alone. `unsync-pi.sh` additionally removes the `skills`
+key it set in `~/.pi/agent/settings.json` during sync.
 
 ## Per-tool targets
 
