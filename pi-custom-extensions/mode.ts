@@ -40,16 +40,46 @@ export default function (pi: ExtensionAPI) {
   // /tools had already disabled some tools) rather than assuming "all".
   let preSafeTools: string[] | null = null;
 
+  function formatTools(ctx: ExtensionContext, max = 6): string {
+    const { theme } = ctx.ui;
+    const tools = pi.getActiveTools();
+    if (tools.length === 0) return theme.fg("dim", "none");
+    const shown = tools.slice(0, max);
+    let text = theme.fg("muted", shown.join(","));
+    if (tools.length > max) {
+      text += theme.fg("dim", `,+${tools.length - max}`);
+    }
+    return text;
+  }
+
+  function formatSkills(ctx: ExtensionContext, max = 4): string {
+    const { theme } = ctx.ui;
+    const skills = pi.getCommands().filter((c) => c.source === "skill");
+    if (skills.length === 0) return theme.fg("dim", "none");
+    const clean = (name: string) =>
+      name.startsWith("skill:") ? name.slice(6) : name;
+    const shown = skills.slice(0, max);
+    let text = theme.fg("muted", shown.map((s) => clean(s.name)).join(","));
+    if (skills.length > max) {
+      text += theme.fg("dim", `,+${skills.length - max}`);
+    }
+    return text;
+  }
+
   // SAFE reads as green/reassuring (restricted, low risk); YOLO reads as
   // red/attention (unrestricted, the actually risky state) — a persistent
   // reminder of which one you're in, not just a toggle confirmation.
   function statusLabel(ctx: ExtensionContext): string {
     const { theme } = ctx.ui;
-    return mode === "safe"
-      ? theme.bold(theme.fg("success", "⏸ SAFE")) +
-          theme.fg("text", "\t(shift+tab to cycle)")
-      : theme.bold(theme.fg("error", "⏵⏵ YOLO")) +
-          theme.fg("text", "\t(shift+tab to cycle)");
+    const modeLabel =
+      mode === "safe"
+        ? theme.bold(theme.fg("success", "⏸ SAFE"))
+        : theme.bold(theme.fg("error", "⏵⏵ YOLO"));
+    return [
+      modeLabel + theme.fg("text", "\t(shift+tab to cycle)"),
+      theme.fg("dim", "tools:") + formatTools(ctx),
+      theme.fg("dim", "skills:") + formatSkills(ctx),
+    ].join(theme.fg("dim", " · "));
   }
 
   function applyStatus(ctx: ExtensionContext) {
@@ -154,5 +184,14 @@ export default function (pi: ExtensionAPI) {
         },
       ],
     };
+  });
+
+  // Refresh the status bar whenever tools or skills may have changed.
+  pi.on("turn_start", async (_event, ctx) => {
+    applyStatus(ctx);
+  });
+
+  pi.on("resources_discover", async (_event, ctx) => {
+    applyStatus(ctx);
   });
 }
