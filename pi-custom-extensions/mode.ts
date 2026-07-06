@@ -27,10 +27,14 @@ const STATUS_ID = "mode";
 const SAFE_MODE_CUSTOM_TYPE = "safe-mode-context";
 
 function safeModeReminder(): string {
-  return `[SAFE MODE ACTIVE]
-The write, edit, and bash tools are not currently in your active toolset — they have been removed, not just blocked. Do not attempt to call them; retrying will not surface new information.
-grep, find, and ls are available in their place for read-only search and inspection.
-If a change is needed, describe what you would do and ask the user to run /yolo, /auto, or press shift+tab to restore full tool access — you cannot exit safe mode yourself.`;
+  return `
+<system-reminder>
+  [SAFE MODE ACTIVE] 
+  The write, edit, and bash tools are not currently in your active toolset — they have been removed, not just blocked. 
+  Do not attempt to call them; retrying will not surface new information. grep, find, and ls are available in their place for read-only search and inspection.
+  If a change is needed, describe what you would do and ask the user to run /yolo, /auto, or press shift+tab to restore full tool access — you cannot exit safe mode yourself.
+</system-reminder>
+`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -176,7 +180,7 @@ export default function (pi: ExtensionAPI) {
       messages: [
         ...withoutStale,
         {
-          role: "custom",
+          role: "user",
           customType: SAFE_MODE_CUSTOM_TYPE,
           content: safeModeReminder(),
           display: false,
