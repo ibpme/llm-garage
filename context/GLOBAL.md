@@ -18,7 +18,27 @@ before editing the synced location.
 
 ## Python
 
-Avoid using system python directly. Use `uv run` or `uv run python` instead, especially if you need external libraries/modules.
+- Always use `uv` — never system Python or `pip` directly.
+- For ad-hoc Python that needs external libraries: `uv run --with some-ext-library`.
+- For project-based work: use `uv run`, `uv add`, `uv sync` — never `pip install`.
+- For standalone scripts (no project dependency), use the `uv` script shebang with inline metadata:
+
+```python
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["httpx"]  # list actual deps needed
+# ///
+```
+
+Run via `uv run script.py` or directly as `./script.py` (after `chmod +x`).
+
+- If possible it is encouraged to use type annotations/type hints when writing Python code
+
+## Comments
+
+- Only comment non-obvious logic; avoid redundant or self-evident comments
 
 ## Context7
 
