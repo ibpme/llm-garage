@@ -25,7 +25,7 @@ if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/build/codex/mcp" ]; then
   for entry in "$REPO_ROOT/build/codex/mcp"/*.toml; do
     [ -e "$entry" ] || continue
     name="$(basename "$entry" .toml)"
-    python3 "$DIR/mcp_merge.py" toml-merge "$TARGET/config.toml" mcp_servers "$name" "$entry"
+    python3 "$DIR/config_merge.py" toml-merge "$TARGET/config.toml" mcp_servers "$name" "$entry"
   done
 fi
 

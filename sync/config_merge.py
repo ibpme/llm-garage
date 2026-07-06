@@ -5,14 +5,19 @@ prompts, files like ~/.claude.json, ~/.codex/config.toml and
 ~/.pi/agent/mcp.json also hold unrelated state (auth, projects, other
 servers) owned by the tool itself, so they can't be symlinked wholesale.
 
+Also supports generic JSON key set/remove for top-level config keys
+(e.g. pi's settings.json).
+
 Used by sync-*.sh / unsync-*.sh after generate.py has produced the
 per-target fragment under build/<target>/mcp/<name>.json|toml.
 
 Usage:
-  mcp_merge.py json-merge  <config_path> <config_key> <name> <entry_json_path>
-  mcp_merge.py json-remove <config_path> <config_key> <name>
-  mcp_merge.py toml-merge  <config_path> <table> <name> <entry_toml_path>
-  mcp_merge.py toml-remove <config_path> <table> <name>
+  config_merge.py json-merge      <config_path> <config_key> <name> <entry_json_path>
+  config_merge.py json-remove     <config_path> <config_key> <name>
+  config_merge.py json-set        <config_path> <key> <json_value>
+  config_merge.py json-remove-key <config_path> <key>
+  config_merge.py toml-merge      <config_path> <table> <name> <entry_toml_path>
+  config_merge.py toml-remove     <config_path> <table> <name>
 """
 import json
 import os
@@ -108,6 +113,38 @@ def json_remove(config_path, config_key, name):
     print(f"removed {config_key}.{name} from {config_path}")
 
 
+def json_set(config_path, key, value_json):
+    try:
+        value = json.loads(value_json)
+    except json.JSONDecodeError as e:
+        sys.exit(f"error: invalid JSON value ({e})")
+    _backup_once(config_path)
+    config = load_json(config_path)
+    if not isinstance(config, dict):
+        sys.exit(f"error: {config_path} top level is not a JSON object, refusing to touch it")
+    existing = config.get(key)
+    if existing == value:
+        print(f"{key} already up to date in {config_path}")
+        return
+    config[key] = value
+    write_json(config_path, config)
+    print(f"set {key} -> {config_path}")
+
+
+def json_remove_key(config_path, key):
+    if not os.path.isfile(config_path):
+        return
+    config = load_json(config_path)
+    if not isinstance(config, dict):
+        return
+    if key not in config:
+        return
+    _backup_once(config_path)
+    del config[key]
+    write_json(config_path, config)
+    print(f"removed {key} from {config_path}")
+
+
 def _normalize_header(line):
     """Collapse whitespace inside `[ table ]` so `[foo.bar]` and
     `[ foo.bar ]` are recognized as the same table -- avoids ending up with
@@ -200,6 +237,12 @@ def main():
         elif cmd == "json-remove":
             _, config_path, config_key, name = args
             json_remove(config_path, config_key, name)
+        elif cmd == "json-set":
+            _, config_path, key, value_json = args
+            json_set(config_path, key, value_json)
+        elif cmd == "json-remove-key":
+            _, config_path, key = args
+            json_remove_key(config_path, key)
         elif cmd == "toml-merge":
             _, config_path, table, name, entry_path = args
             toml_merge(config_path, table, name, entry_path)

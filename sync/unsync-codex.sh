@@ -18,7 +18,7 @@ unlink_repo_symlinks "$TARGET/prompts"
 if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/mcp" ]; then
   for d in "$REPO_ROOT/mcp"/*/; do
     [ -d "$d" ] || continue
-    python3 "$DIR/mcp_merge.py" toml-remove "$TARGET/config.toml" mcp_servers "$(basename "$d")"
+    python3 "$DIR/config_merge.py" toml-remove "$TARGET/config.toml" mcp_servers "$(basename "$d")"
   done
 fi
 

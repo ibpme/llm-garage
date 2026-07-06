@@ -18,7 +18,7 @@ mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args) -
 sync/
   generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
-  mcp_merge.py            merges/removes one MCP server entry into a tool's native config file (--with-mcp only)
+  config_merge.py         merges/removes config entries (MCP servers, top-level keys) in tool native config files (--with-mcp only)
   refresh-context7.py     pulls Context7's skill/rule content from upstream, diffs against the repo
   sync-claude.sh
   sync-codex.sh
@@ -46,9 +46,9 @@ their native config files (`~/.claude.json`, `~/.codex/config.toml`,
 `~/.pi/agent/mcp.json`) also hold each tool's own unrelated state -- auth,
 project lists, other servers not managed by this repo -- so even the
 *generated* fragment can't be symlinked into place. Instead
-`sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh` call `mcp_merge.py` to upsert
+`sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh` call `config_merge.py` to upsert
 just that one server's entry/table, leaving the rest of the file untouched
-(with a one-time backup on first write, see `mcp_merge.py`'s
+(with a one-time backup on first write, see `config_merge.py`'s
 `_backup_once`). `unsync-*.sh --with-mcp` reverses this by deleting just
 that entry. OpenCode isn't included in `mcp/` sync at all -- MCP servers
 there are configured through its own plugin ecosystem.
@@ -84,7 +84,7 @@ no-op once everything is already unsynced.
 MCP server entries aren't symlinks, so they're reversed separately: run
 `unsync-*.sh --with-mcp` (matching however you synced) to also remove this
 repo's entries from the relevant native config file (`~/.claude.json`,
-`~/.codex/config.toml`, `~/.pi/agent/mcp.json`) via `mcp_merge.py`, leaving
+`~/.codex/config.toml`, `~/.pi/agent/mcp.json`) via `config_merge.py`, leaving
 everything else in those files untouched. Without `--with-mcp`, unsync
 leaves MCP entries alone.
 
@@ -95,7 +95,7 @@ leaves MCP entries alone.
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/<name>/` | `~/.claude/agents/<name>.md` | `~/.claude/commands/<name>.md` | merged into `~/.claude.json`'s `mcpServers` |
 | Codex CLI | `~/.codex/AGENTS.md` | `~/.codex/skills/<name>/` | `~/.codex/agents/<name>.toml` | `~/.codex/prompts/<name>.md` (deprecated upstream -- prefer skills for anything auto-triggered) | merged into `~/.codex/config.toml`'s `[mcp_servers.<name>]` |
 | OpenCode | `~/.config/opencode/AGENTS.md` | `~/.config/opencode/skills/<name>/` | `~/.config/opencode/agents/<name>.md` | `~/.config/opencode/commands/<name>.md` | not managed here (see `mcp/` section below) |
-| pi | `~/.pi/agent/AGENTS.md` | none needed -- pi's `settings.json` already points at `~/.claude/skills` and `~/.codex/skills` | `~/.pi/agent/agents/<name>.md` | `~/.pi/agent/prompts/<name>.md` | merged into `~/.pi/agent/mcp.json`'s `mcpServers` |
+| pi | `~/.pi/agent/AGENTS.md` | merged into `~/.pi/agent/settings.json`'s `skills` (`~/.claude/skills` + `~/.codex/skills`) | `~/.pi/agent/agents/<name>.md` | `~/.pi/agent/prompts/<name>.md` | merged into `~/.pi/agent/mcp.json`'s `mcpServers` |
 
 ## Setup on a new machine
 

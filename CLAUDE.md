@@ -52,7 +52,7 @@ symlinks, not generated.
   command dir with only minor frontmatter differences.
 - `mcp/<name>/spec.yaml` — non-canonical, **opt-in only** (`--with-mcp`).
   stdio servers only (`command` + args). Merged into each tool's native
-  MCP config via `sync/mcp_merge.py`, which upserts just one server's
+  MCP config via `sync/config_merge.py`, which upserts just one server's
   entry/table and leaves the rest of the file (auth, other servers,
   project lists) untouched, with a one-time backup on first write.
 - `sync/generate.py` — the only place that does real translation work:

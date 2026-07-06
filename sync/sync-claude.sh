@@ -25,7 +25,7 @@ if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/build/claude/mcp" ]; then
   for entry in "$REPO_ROOT/build/claude/mcp"/*.json; do
     [ -e "$entry" ] || continue
     name="$(basename "$entry" .json)"
-    python3 "$DIR/mcp_merge.py" json-merge "$HOME/.claude.json" mcpServers "$name" "$entry"
+    python3 "$DIR/config_merge.py" json-merge "$HOME/.claude.json" mcpServers "$name" "$entry"
   done
 fi
 

@@ -14,9 +14,9 @@ link_one "$REPO_ROOT/context/GLOBAL.md" "$TARGET/AGENTS.md"
 # resume syncing them.
 # link_dir_contents "$REPO_ROOT/build/pi/agents" "$TARGET/agents"
 link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
-# No skills link needed here: ~/.pi/agent/settings.json already points
-# pi's "skills" config at ~/.claude/skills and ~/.codex/skills, both of
-# which sync-claude.sh / sync-codex.sh populate.
+# Ensure pi's settings.json points at the same skill directories that
+# sync-claude.sh / sync-codex.sh populate.
+python3 "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.claude/skills","~/.codex/skills"]'
 
 # Symlink custom extensions from this repo into pi's extensions dir
 # (individual file links, so pi-specific local extensions stay untouched).
@@ -35,7 +35,7 @@ if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/build/pi/mcp" ]; then
   for entry in "$REPO_ROOT/build/pi/mcp"/*.json; do
     [ -e "$entry" ] || continue
     name="$(basename "$entry" .json)"
-    python3 "$DIR/mcp_merge.py" json-merge "$TARGET/mcp.json" mcpServers "$name" "$entry"
+    python3 "$DIR/config_merge.py" json-merge "$TARGET/mcp.json" mcpServers "$name" "$entry"
   done
 fi
 
