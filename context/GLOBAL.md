@@ -22,6 +22,6 @@ Avoid using system python directly. Use `uv run` or `uv run python` instead, esp
 
 ## Context7
 
-Use Context7 MCP or the context7-mcp or context7-docs skill if available to fetch current documentation whenever you need information about a library, framework, SDK, API, CLI tool, or cloud service -- even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer -- your training data may not reflect recent changes. Prefer this over web search for library docs.
+Use Context7 MCP, the context7-mcp or context7-docs skill if available to fetch current documentation whenever you need information about a library, framework, SDK, API, CLI tool, or cloud service -- even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer -- your training data may not reflect recent changes. Prefer this over web search for library docs.
 
 DO NOT USE FOR: general questions, general programming concepts, non-programming concepts or debugging business logic. Refer to other web search or fetch tools if available.
