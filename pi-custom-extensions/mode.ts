@@ -331,6 +331,9 @@ export default function (pi: ExtensionAPI) {
         // Queue a silent follow-up so a new turn starts as soon as this
         // one ends, picking up write/edit/bash without the user having
         // to send another message themselves.
+
+        // Might not be necessary assuming the LLM already infered from the result of this tool call
+        /*
         const clarification = result.note ? ` User note: ${result.note}` : "";
         pi.sendMessage(
           {
@@ -348,6 +351,7 @@ export default function (pi: ExtensionAPI) {
           // if it's ever false.
           { deliverAs: "followUp", triggerTurn: true },
         );
+        */
       }
 
       const text = result.approved
