@@ -335,7 +335,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage(
           {
             customType: "change-mode-followup",
-            content: `${params.mode.toUpperCase()} mode is now active — write, edit, and bash are available. Continue with the task.${clarification}`,
+            content: `${params.mode.toUpperCase()} mode is now active. Continue with the task.${clarification}`,
             display: false,
           },
           { deliverAs: "followUp" },
