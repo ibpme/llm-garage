@@ -338,12 +338,20 @@ export default function (pi: ExtensionAPI) {
             content: `${params.mode.toUpperCase()} mode is now active. Continue with the task.${clarification}`,
             display: false,
           },
-          { deliverAs: "followUp" },
+          // deliverAs: "followUp" only fires if this.isStreaming is true
+          // at this exact moment (see agent-session.js's
+          // sendCustomMessage branch order); if that assumption is ever
+          // wrong, the call falls through to a silent no-op with no turn
+          // triggered at all. triggerTurn is a no-op when isStreaming is
+          // true (the current, expected path) but is the fallback that
+          // routes to _runAgentPrompt instead of silently doing nothing
+          // if it's ever false.
+          { deliverAs: "followUp", triggerTurn: true },
         );
       }
 
       const text = result.approved
-        ? `User approved switching to ${params.mode.toUpperCase()} mode. Full tool access resumes automatically in a follow-up turn right after this one.${result.note ? ` Note: ${result.note}` : ""}`
+        ? `User approved switching to ${params.mode.toUpperCase()} mode. Tool access resumes automatically in a follow-up turn right after this one.${result.note ? ` Note: ${result.note}` : ""}`
         : `User denied switching to ${params.mode.toUpperCase()} mode; remaining in SAFE mode.${result.note ? ` Reason: ${result.note}` : ""}`;
 
       return {
