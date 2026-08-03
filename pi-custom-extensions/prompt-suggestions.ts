@@ -291,6 +291,7 @@ async function requestOllama(
     body: JSON.stringify({
       model: config.model,
       stream: false,
+      think: false,
       options: { temperature: 0.3, num_predict: 80 },
       messages: [
         { role: "system", content: SUGGESTION_SYSTEM_PROMPT },
