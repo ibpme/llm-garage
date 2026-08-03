@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,8 +21,6 @@ import {
 
 const CONFIG_DIR = join(homedir(), ".pi", "agent");
 const CONFIG_PATH = join(CONFIG_DIR, "prompt-suggestions.json");
-const DEBUG_LOG_PATH = join(CONFIG_DIR, "prompt-suggestions.log");
-const DEBUG_ENABLED = process.env.PI_SUGGESTIONS_DEBUG === "1";
 const STATUS_ID = "prompt-suggestions";
 const DEFAULT_MODEL = "gemma4:e2b";
 const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
@@ -31,23 +29,6 @@ const MAX_CONTEXT_CHARS = 16_000;
 const MAX_SUGGESTION_CHARS = 240;
 const NO_SUGGESTION = "NO_SUGGESTION";
 const CURSOR_SPACE = "\x1b[7m \x1b[0m";
-
-let debugWriteChain = Promise.resolve();
-
-function debugLog(event: string, details: Record<string, unknown> = {}): void {
-  if (!DEBUG_ENABLED) return;
-  const line = `${JSON.stringify({
-    timestamp: new Date().toISOString(),
-    event,
-    ...details,
-  })}\n`;
-  debugWriteChain = debugWriteChain
-    .then(async () => {
-      await mkdir(CONFIG_DIR, { recursive: true });
-      await appendFile(DEBUG_LOG_PATH, line, "utf8");
-    })
-    .catch(() => undefined);
-}
 
 const SUGGESTION_SYSTEM_PROMPT = `You suggest one useful next-step follow-up prompt for an ongoing conversation.
 
@@ -115,24 +96,12 @@ class SuggestionEditor implements EditorComponent, Focusable {
 
   constructor(
     private readonly base: EditorComponent,
-    private readonly tui: TUI,
+    tui: TUI,
     private readonly suggestionState: SuggestionState,
     private readonly onUserInput: () => void,
-    private readonly log: typeof debugLog,
   ) {
-    let ghostRenderLogged = false;
-    suggestionState.subscribe(() => {
-      ghostRenderLogged = false;
-      tui.requestRender();
-    });
-    this.ghostRenderLogged = () => ghostRenderLogged;
-    this.setGhostRenderLogged = (value) => {
-      ghostRenderLogged = value;
-    };
+    suggestionState.subscribe(() => tui.requestRender());
   }
-
-  private ghostRenderLogged: () => boolean;
-  private setGhostRenderLogged: (value: boolean) => void;
 
   get focused(): boolean {
     return "focused" in this.base
@@ -277,18 +246,7 @@ class SuggestionEditor implements EditorComponent, Focusable {
     const lineIndex = lines.findIndex(
       (line) => line.includes(CURSOR_MARKER) || line.includes(CURSOR_SPACE),
     );
-    if (lineIndex < 0) {
-      if (!this.ghostRenderLogged()) {
-        this.log("render-cursor-not-found", {
-          lineCount: lines.length,
-          hasHardwareCursor: lines.some((line) => line.includes(CURSOR_MARKER)),
-          hasSoftwareCursor: lines.some((line) => line.includes(CURSOR_SPACE)),
-          textLength: this.getText().length,
-        });
-        this.setGhostRenderLogged(true);
-      }
-      return lines;
-    }
+    if (lineIndex < 0) return lines;
 
     const line = lines[lineIndex]!;
     const hardwareCursorIndex = line.indexOf(CURSOR_MARKER);
@@ -309,15 +267,6 @@ class SuggestionEditor implements EditorComponent, Focusable {
       cursorToken +
       `\x1b[2m${ghost}\x1b[0m` +
       " ".repeat(Math.max(0, availableWidth - ghostWidth));
-    if (!this.ghostRenderLogged()) {
-      this.log("ghost-rendered", {
-        suggestionLength: suggestion.length,
-        lineIndex,
-        hardwareCursor: useHardwareCursor,
-        availableWidth,
-      });
-      this.setGhostRenderLogged(true);
-    }
     return lines;
   }
 }
@@ -506,10 +455,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   }
 
   function cancelRequest(ctx?: ExtensionContext): void {
-    debugLog("request-cancelled", {
-      hasActiveRequest: requestController !== undefined,
-      hasContext: ctx !== undefined,
-    });
     requestGeneration++;
     requestController?.abort();
     requestController = undefined;
@@ -519,7 +464,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   }
 
   function cancelForEditorInput(): void {
-    debugLog("editor-input");
     cancelRequest(activeContext);
     if (state.suggestion) state.setSuggestion(null);
   }
@@ -533,20 +477,15 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
     editorInstallTimer = setTimeout(() => {
       editorInstallTimer = undefined;
       const previous = ctx.ui.getEditorComponent();
-      debugLog("editor-install", { hasPreviousFactory: previous !== undefined });
       ctx.ui.setEditorComponent((tui, theme, keybindings) => {
         const base =
           previous?.(tui, theme, keybindings) ??
           new CustomEditor(tui, theme, keybindings);
-        debugLog("editor-created", {
-          baseConstructor: (base as object).constructor?.name,
-        });
         return new SuggestionEditor(
           base,
           tui,
           state,
           cancelForEditorInput,
-          debugLog,
         );
       });
     }, 0);
@@ -556,27 +495,13 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
     const editorTextLength = ctx.ui.getEditorText().length;
     const idle = ctx.isIdle();
     if (!state.enabled || ctx.mode !== "tui" || editorTextLength > 0 || !idle) {
-      debugLog("generation-skipped", {
-        enabled: state.enabled,
-        mode: ctx.mode,
-        editorTextLength,
-        idle,
-      });
       return;
     }
 
     const context = serializeContext(ctx);
-    if (!context) {
-      debugLog("generation-skipped", { reason: "empty-context" });
-      return;
-    }
+    if (!context) return;
 
     const contextKey = ctx.sessionManager.getLeafId() ?? context;
-    debugLog("generation-started", {
-      contextLength: context.length,
-      contextKeyLength: contextKey.length,
-      model: config.model,
-    });
     cancelRequest(ctx);
     const controller = new AbortController();
     requestController = controller;
@@ -588,10 +513,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
 
     try {
       const raw = await requestOllama(config, context, controller.signal);
-      debugLog("ollama-response", {
-        contentLength: raw?.length ?? 0,
-        hasContent: raw !== null,
-      });
       if (
         generation !== requestGeneration ||
         controller.signal.aborted ||
@@ -607,10 +528,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
           ? previousSuggestion.text
           : null;
       const suggestion = validateSuggestion(raw, previous);
-      debugLog("suggestion-validated", {
-        accepted: suggestion !== null,
-        outputLength: suggestion?.length ?? 0,
-      });
       if (suggestion) {
         lastSuggestion = { text: suggestion, contextKey };
         state.setSuggestion(suggestion);
@@ -619,9 +536,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
       updateStatus(ctx);
     } catch (error) {
       if (generation !== requestGeneration || controller.signal.aborted) return;
-      debugLog("generation-error", {
-        message: error instanceof Error ? error.message : String(error),
-      });
       state.setPhase("unavailable");
       updateStatus(ctx);
       clearUnavailableTimer();
@@ -672,18 +586,11 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       activeContext = ctx;
       const choice = args.trim().toLowerCase();
-      if (choice === "debug") {
-        const message = `enabled=${state.enabled}, phase=${state.phase}, suggestion=${state.suggestion !== null}, model=${config.model}, debug=${DEBUG_ENABLED}`;
-        debugLog("debug-command", { message });
-        ctx.ui.notify(message, "info");
-        return;
-      }
       if (choice && choice !== "on" && choice !== "off") {
-        ctx.ui.notify("Usage: /suggestions [on|off|debug]", "error");
+        ctx.ui.notify("Usage: /suggestions [on|off]", "error");
         return;
       }
       const enabled = choice === "on" ? true : choice === "off" ? false : !state.enabled;
-      debugLog("toggle", { enabled });
       await setEnabled(enabled, ctx);
     },
   });
@@ -699,13 +606,6 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     activeContext = ctx;
     config = await loadConfig();
-    debugLog("session-start", {
-      mode: ctx.mode,
-      enabled: config.enabled,
-      model: config.model,
-      ollamaUrl: config.ollamaUrl,
-      debug: DEBUG_ENABLED,
-    });
     state.setEnabled(config.enabled);
     state.setPhase("idle");
     installEditor(ctx);
@@ -713,14 +613,12 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", async (_event, ctx) => {
-    debugLog("agent-start");
     activeContext = ctx;
     cancelRequest(ctx);
     state.setSuggestion(null);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    debugLog("agent-settled", { mode: ctx.mode, idle: ctx.isIdle() });
     activeContext = ctx;
     void generateSuggestion(ctx);
   });
