@@ -104,7 +104,7 @@ export default function (pi: ExtensionAPI) {
         ? theme.bold(theme.fg("success", "⏸ SAFE"))
         : theme.bold(theme.fg("error", "⏵⏵ YOLO"));
     return [
-      modeLabel + theme.fg("text", "\t(shift+tab to cycle)"),
+      modeLabel + theme.fg("text", "\t(shift+tab to toggle)"),
       theme.fg("dim", "tools:") + formatTools(ctx),
       theme.fg("dim", "skills:") + formatSkills(ctx),
     ].join(theme.fg("dim", " · "));
@@ -401,8 +401,8 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => setMode("yolo", ctx),
   });
 
-  // Requires "app.thinking.cycle" freed in ~/.pi/agent/keybindings.json,
-  // otherwise this is silently dropped as a reserved-key conflict.
+  // The built-in thinking cycle is remapped to shift+right in
+  // ~/.pi/agent/keybindings.json, leaving shift+tab available here.
   pi.registerShortcut("shift+tab", {
     description: "Toggle YOLO/SAFE mode",
     handler: async (ctx) => setMode(mode === "safe" ? "yolo" : "safe", ctx),
