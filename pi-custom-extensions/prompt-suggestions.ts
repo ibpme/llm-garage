@@ -10,7 +10,10 @@ import {
 import {
   matchesKey,
   truncateToWidth,
+  type AutocompleteProvider,
+  type EditorComponent,
   type EditorTheme,
+  type Focusable,
   type TUI,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -85,16 +88,83 @@ class SuggestionState {
   }
 }
 
-class SuggestionEditor extends CustomEditor {
+class SuggestionEditor implements EditorComponent, Focusable {
+  private submitHandler: ((text: string) => void) | undefined;
+  private changeHandler: ((text: string) => void) | undefined;
+
   constructor(
-    tui: TUI,
-    theme: EditorTheme,
-    keybindings: KeybindingsManager,
+    private readonly base: EditorComponent,
+    private readonly tui: TUI,
     private readonly suggestionState: SuggestionState,
     private readonly onUserInput: () => void,
   ) {
-    super(tui, theme, keybindings);
     suggestionState.subscribe(() => tui.requestRender());
+  }
+
+  get focused(): boolean {
+    return "focused" in this.base
+      ? (this.base as EditorComponent & Focusable).focused
+      : false;
+  }
+
+  set focused(value: boolean) {
+    if ("focused" in this.base) {
+      (this.base as EditorComponent & Focusable).focused = value;
+    }
+  }
+
+  get actionHandlers(): Map<string, () => void> {
+    return (this.base as CustomEditor).actionHandlers;
+  }
+
+  get onEscape(): (() => void) | undefined {
+    return (this.base as CustomEditor).onEscape;
+  }
+
+  set onEscape(handler: (() => void) | undefined) {
+    (this.base as CustomEditor).onEscape = handler;
+  }
+
+  get onCtrlD(): (() => void) | undefined {
+    return (this.base as CustomEditor).onCtrlD;
+  }
+
+  set onCtrlD(handler: (() => void) | undefined) {
+    (this.base as CustomEditor).onCtrlD = handler;
+  }
+
+  get onPasteImage(): (() => void) | undefined {
+    return (this.base as CustomEditor).onPasteImage;
+  }
+
+  set onPasteImage(handler: (() => void) | undefined) {
+    (this.base as CustomEditor).onPasteImage = handler;
+  }
+
+  get onExtensionShortcut(): ((data: string) => boolean) | undefined {
+    return (this.base as CustomEditor).onExtensionShortcut;
+  }
+
+  set onExtensionShortcut(handler: ((data: string) => boolean) | undefined) {
+    (this.base as CustomEditor).onExtensionShortcut = handler;
+  }
+
+  get onSubmit(): ((text: string) => void) | undefined {
+    return this.submitHandler;
+  }
+
+  set onSubmit(handler: ((text: string) => void) | undefined) {
+    this.submitHandler = handler;
+    this.base.onSubmit = handler;
+  }
+
+  get onChange(): ((text: string) => void) | undefined {
+    return this.changeHandler;
+  }
+
+  set onChange(handler: ((text: string) => void) | undefined) {
+    this.changeHandler = handler;
+    this.base.onChange = handler;
   }
 
   handleInput(data: string): void {
@@ -102,7 +172,7 @@ class SuggestionEditor extends CustomEditor {
       const suggestion = this.suggestionState.suggestion;
       this.suggestionState.setSuggestion(null);
       this.onUserInput();
-      super.setText(suggestion);
+      this.base.setText(suggestion);
       return;
     }
 
@@ -113,25 +183,61 @@ class SuggestionEditor extends CustomEditor {
     }
 
     this.onUserInput();
-    super.handleInput(data);
+    this.base.handleInput(data);
   }
 
-  override setText(text: string): void {
+  setText(text: string): void {
     if (text.length > 0) {
       this.suggestionState.setSuggestion(null);
       this.onUserInput();
     }
-    super.setText(text);
+    this.base.setText(text);
   }
 
-  override insertTextAtCursor(text: string): void {
+  insertTextAtCursor(text: string): void {
     this.suggestionState.setSuggestion(null);
     this.onUserInput();
-    super.insertTextAtCursor(text);
+    this.base.insertTextAtCursor?.(text);
   }
 
-  override render(width: number): string[] {
-    const lines = super.render(width);
+  getText(): string {
+    return this.base.getText();
+  }
+
+  getExpandedText(): string {
+    return this.base.getExpandedText?.() ?? this.base.getText();
+  }
+
+  addToHistory(text: string): void {
+    this.base.addToHistory?.(text);
+  }
+
+  setAutocompleteProvider(provider: AutocompleteProvider): void {
+    this.base.setAutocompleteProvider?.(provider);
+  }
+
+  setPaddingX(padding: number): void {
+    this.base.setPaddingX?.(padding);
+  }
+
+  setAutocompleteMaxVisible(maxVisible: number): void {
+    this.base.setAutocompleteMaxVisible?.(maxVisible);
+  }
+
+  get borderColor(): ((text: string) => string) | undefined {
+    return this.base.borderColor;
+  }
+
+  set borderColor(colorizer: ((text: string) => string) | undefined) {
+    this.base.borderColor = colorizer;
+  }
+
+  invalidate(): void {
+    this.base.invalidate();
+  }
+
+  render(width: number): string[] {
+    const lines = this.base.render(width);
     const suggestion = this.suggestionState.suggestion;
     if (!suggestion || this.getText().length > 0) return lines;
 
@@ -326,6 +432,7 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   let requestGeneration = 0;
   let lastSuggestion: { text: string; contextKey: string } | null = null;
   let unavailableTimer: ReturnType<typeof setTimeout> | undefined;
+  let editorInstallTimer: ReturnType<typeof setTimeout> | undefined;
   let activeContext: ExtensionContext | undefined;
 
   function updateStatus(ctx: ExtensionContext): void {
@@ -353,15 +460,25 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
 
   function installEditor(ctx: ExtensionContext): void {
     if (ctx.mode !== "tui") return;
-    ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-      new SuggestionEditor(
-        tui,
-        theme,
-        keybindings,
-        state,
-        cancelForEditorInput,
-      ),
-    );
+    if (editorInstallTimer) clearTimeout(editorInstallTimer);
+
+    // pi-vim also installs a custom editor during session_start. Install on
+    // the next task so we wrap whichever editor the other extensions chose.
+    editorInstallTimer = setTimeout(() => {
+      editorInstallTimer = undefined;
+      const previous = ctx.ui.getEditorComponent();
+      ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+        const base =
+          previous?.(tui, theme, keybindings) ??
+          new CustomEditor(tui, theme, keybindings);
+        return new SuggestionEditor(
+          base,
+          tui,
+          state,
+          cancelForEditorInput,
+        );
+      });
+    }, 0);
   }
 
   async function generateSuggestion(ctx: ExtensionContext): Promise<void> {
@@ -500,6 +617,8 @@ export default function promptSuggestionsExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    if (editorInstallTimer) clearTimeout(editorInstallTimer);
+    editorInstallTimer = undefined;
     cancelRequest(ctx);
     state.setSuggestion(null);
     clearUnavailableTimer();
