@@ -48,6 +48,8 @@ function thinkingColor(level: string) {
       return "thinkingHigh" as const;
     case "xhigh":
       return "thinkingXhigh" as const;
+    case "max":
+      return "thinkingMax" as const;
     default:
       return "thinkingOff" as const;
   }
