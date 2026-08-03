@@ -1,0 +1,5 @@
+{
+  "enabled": true,
+  "model": "gemma4:e2b",
+  "ollamaUrl": "http://127.0.0.1:11434"
+}

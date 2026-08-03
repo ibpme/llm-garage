@@ -16,7 +16,8 @@ subagents/<name>/         non-canonical -- deferred, not synced into any live to
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
 mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args) -- opt-in, see below
 pi-custom-extensions/      pi-specific TypeScript extensions (hotkeyed mode toggle, status line, etc.)
-pi-custom-keybinds/        pi-specific keybindings.json override
+pi-custom-config/           tracked defaults for mutable pi extension configuration
+pi-custom-keybinds/         pi-specific keybindings.json override
 sync/
   generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
@@ -68,6 +69,11 @@ git pull
 
 Editing `context/GLOBAL.md` or `skills/` takes effect immediately since
 those are direct symlinks -- no regeneration step.
+
+`sync-pi.sh` also installs tracked defaults from `pi-custom-config/` as
+ordinary files when their live config does not exist. This is intentional for
+mutable extension state: pi can update the live copy without modifying this
+repository, and later syncs preserve the user's local preference.
 
 ## Undoing a sync
 

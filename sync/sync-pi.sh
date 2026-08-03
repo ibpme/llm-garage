@@ -22,6 +22,15 @@ python3 "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.cla
 # (individual file links, so pi-specific local extensions stay untouched).
 link_dir_contents "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
+# Install mutable extension defaults once. Unlike extensions and keybindings,
+# this must be a normal file: the extension updates it when the user toggles
+# suggestions, and that runtime preference should not modify this repository.
+SUGGESTIONS_CONFIG="$TARGET/prompt-suggestions.json"
+if [ ! -e "$SUGGESTIONS_CONFIG" ] && [ ! -L "$SUGGESTIONS_CONFIG" ]; then
+  cp "$REPO_ROOT/pi-custom-config/prompt-suggestions.json" "$SUGGESTIONS_CONFIG"
+  echo "installed default $SUGGESTIONS_CONFIG"
+fi
+
 # Symlink this repo's keybindings.json override (unlike extensions, pi reads
 # this as a single whole file, not a directory of entries).
 link_one "$REPO_ROOT/pi-custom-keybinds/keybindings.json" "$TARGET/keybindings.json"
