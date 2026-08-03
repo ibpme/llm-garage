@@ -8,6 +8,7 @@ import {
   type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  CURSOR_MARKER,
   matchesKey,
   truncateToWidth,
   type AutocompleteProvider,
@@ -241,20 +242,28 @@ class SuggestionEditor implements EditorComponent, Focusable {
     const suggestion = this.suggestionState.suggestion;
     if (!suggestion || this.getText().length > 0) return lines;
 
-    const lineIndex = lines.findIndex((line) => line.includes(CURSOR_SPACE));
+    const lineIndex = lines.findIndex(
+      (line) => line.includes(CURSOR_MARKER) || line.includes(CURSOR_SPACE),
+    );
     if (lineIndex < 0) return lines;
 
     const line = lines[lineIndex]!;
-    const cursorIndex = line.indexOf(CURSOR_SPACE);
+    const hardwareCursorIndex = line.indexOf(CURSOR_MARKER);
+    const softwareCursorIndex = line.indexOf(CURSOR_SPACE);
+    const useHardwareCursor = hardwareCursorIndex >= 0;
+    const cursorIndex = useHardwareCursor
+      ? hardwareCursorIndex
+      : softwareCursorIndex;
+    const cursorToken = useHardwareCursor ? CURSOR_MARKER : CURSOR_SPACE;
     const before = line.slice(0, cursorIndex);
-    const after = line.slice(cursorIndex + CURSOR_SPACE.length);
+    const after = line.slice(cursorIndex + cursorToken.length);
     const availableWidth = visibleWidth(after);
     const ghost = truncateToWidth(suggestion, availableWidth, "");
     const ghostWidth = visibleWidth(ghost);
 
     lines[lineIndex] =
       before +
-      CURSOR_SPACE +
+      cursorToken +
       `\x1b[2m${ghost}\x1b[0m` +
       " ".repeat(Math.max(0, availableWidth - ghostWidth));
     return lines;
