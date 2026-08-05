@@ -26,6 +26,10 @@ const CHANGE_MODE_TOOL = "change_mode";
 const SAFE_ONLY_TOOLS = new Set([...SAFE_EXTRA_TOOLS, CHANGE_MODE_TOOL]);
 const STATUS_ID = "mode";
 const SAFE_MODE_CUSTOM_TYPE = "safe-mode-context";
+const SAFE_MODE_GUIDELINES = [
+  "SAFE mode is active: write, edit, and bash are unavailable. Do not attempt to call them.",
+  'Use change_mode with mode "yolo" when write, edit, or bash access is required.',
+];
 
 function safeModeReminder(): string {
   return `
@@ -129,9 +133,7 @@ export default function (pi: ExtensionAPI) {
       "Request user approval to switch from SAFE to YOLO mode when more tool access is needed.",
     promptSnippet:
       "Request user approval to switch from safe mode to yolo mode when more tool access is needed",
-    promptGuidelines: [
-      "Use change_mode when SAFE mode lacks write, edit, or bash access required for the task.",
-    ],
+    promptGuidelines: SAFE_MODE_GUIDELINES,
     parameters: Type.Object({
       mode: StringEnum(["yolo"] as const, {
         description: "Target mode to switch to.",
@@ -271,14 +273,16 @@ export default function (pi: ExtensionAPI) {
 
     return {
       messages: [
-        ...messages,
+        // Keep this stable at the beginning of the context so later requests
+        // remain append-only and can reuse the provider's cached prefix.
         {
           role: "user",
           customType: SAFE_MODE_CUSTOM_TYPE,
           content: safeModeReminder(),
           display: false,
-          timestamp: Date.now(),
+          timestamp: 0,
         },
+        ...messages,
       ],
     };
   });
