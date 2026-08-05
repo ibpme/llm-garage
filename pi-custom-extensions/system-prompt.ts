@@ -11,7 +11,9 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
-const VIEWPORT_LINES = 28;
+function estimateTokens(text: string): number {
+	return Math.ceil(Array.from(text).length / 4);
+}
 
 async function showScrollableText(
 	title: string,
@@ -24,6 +26,8 @@ async function showScrollableText(
 		console.log("");
 		return;
 	}
+
+	const estimatedTokens = estimateTokens(content);
 
 	const wrapAll = (text: string, width: number): string[] => {
 		const raw = text.split("\n");
@@ -50,46 +54,67 @@ async function showScrollableText(
 		return out;
 	};
 
-	await ctx.ui.custom((_tui, theme, _kb, done) => {
+	await ctx.ui.custom((tui, theme, _kb, done) => {
 		let allLines: string[] = [];
 		let offset = 0;
+		let viewportLines = 1;
+		let compact = false;
 		let pendingG = false;
 
+		const fit = (s: string, len: number) => {
+			if (visibleWidth(s) <= len) return s;
+			return Array.from(s).slice(0, Math.max(0, len - 1)).join("") + "…";
+		};
+
 		const pad = (s: string, len: number) => {
-			const vis = visibleWidth(s);
-			return s + " ".repeat(Math.max(0, len - vis));
+			const fitted = fit(s, len);
+			return fitted + " ".repeat(Math.max(0, len - visibleWidth(fitted)));
 		};
 
 		const render = (width: number) => {
 			const innerW = Math.max(1, width - 2);
+			// Leave two extra rows for the host TUI's surrounding layout so the
+			// frame's top border and title are never clipped.
+			compact = tui.terminal.rows < 8;
+			viewportLines = compact
+				? Math.max(0, tui.terminal.rows - 1)
+				: Math.max(1, tui.terminal.rows - 9);
 			allLines = wrapAll(content, innerW);
 
-			const maxOffset = Math.max(0, allLines.length - VIEWPORT_LINES);
+			const maxOffset = Math.max(0, allLines.length - viewportLines);
 			offset = Math.min(offset, maxOffset);
 
 			const lines: string[] = [];
+			const titleText = fit(title, Math.max(0, innerW - 1));
+			const titleLine = ` ${theme.fg("accent", theme.bold(titleText))}`;
+			if (compact) {
+				if (tui.terminal.rows > 0) lines.push(pad(titleLine, innerW));
+				return lines.concat(allLines.slice(offset, offset + viewportLines).map((line) => fit(line, innerW)));
+			}
 			lines.push(theme.fg("border", `╭${"─".repeat(innerW)}╮`));
-
-			const titleLine = ` ${theme.fg("accent", theme.bold(title))}`;
-			lines.push(theme.fg("border", "│") + pad(titleLine, innerW) + theme.fg("border", "│"));
+			const titlePadding = " ".repeat(Math.max(0, innerW - 1 - visibleWidth(titleText)));
+			lines.push(
+				theme.fg("border", "│") + titleLine + titlePadding + theme.fg("border", "│"),
+			);
 			lines.push(theme.fg("border", `├${"─".repeat(innerW)}┤`));
 
-			const visible = allLines.slice(offset, offset + VIEWPORT_LINES);
+			const visible = allLines.slice(offset, offset + viewportLines);
 			for (const line of visible) {
 				lines.push(theme.fg("border", "│") + pad(line, innerW) + theme.fg("border", "│"));
 			}
-			for (let i = visible.length; i < VIEWPORT_LINES; i++) {
+			for (let i = visible.length; i < viewportLines; i++) {
 				lines.push(theme.fg("border", "│") + " ".repeat(innerW) + theme.fg("border", "│"));
 			}
 
 			lines.push(theme.fg("border", `├${"─".repeat(innerW)}┤`));
 
 			const footerParts: string[] = [];
-			if (allLines.length > VIEWPORT_LINES) {
+			if (allLines.length > viewportLines) {
 				footerParts.push(
-					`${offset + 1}-${Math.min(offset + VIEWPORT_LINES, allLines.length)}/${allLines.length}`,
+					`${offset + 1}-${Math.min(offset + viewportLines, allLines.length)}/${allLines.length}`,
 				);
 			}
+			footerParts.push(`~${estimatedTokens} tokens`);
 			footerParts.push("↑↓/jk scroll • PageUp/PageDown • gg/G home/end • Esc/q close");
 			const footer = " " + theme.fg("dim", footerParts.join("  "));
 			lines.push(theme.fg("border", "│") + pad(footer, innerW) + theme.fg("border", "│"));
@@ -102,10 +127,12 @@ async function showScrollableText(
 			render,
 			invalidate: () => {},
 			handleInput: (data: string) => {
-				const maxOffset = Math.max(0, allLines.length - VIEWPORT_LINES);
+				const maxOffset = Math.max(0, allLines.length - viewportLines);
 
 				if (matchesKey(data, "escape") || data === "q" || data === "Q") {
 					done(undefined);
+					// Ensure the restored editor is painted after custom() releases it.
+					tui.requestRender(true);
 					return;
 				}
 
@@ -129,11 +156,11 @@ async function showScrollableText(
 					pendingG = false;
 				} else if (matchesKey(data, "pageUp") || data === "\x15") {
 					// Ctrl+u = half page up
-					offset = Math.max(0, offset - Math.floor(VIEWPORT_LINES / 2));
+					offset = Math.max(0, offset - Math.floor(viewportLines / 2));
 					pendingG = false;
 				} else if (matchesKey(data, "pageDown") || data === "\x04") {
 					// Ctrl+d = half page down
-					offset = Math.min(maxOffset, offset + Math.floor(VIEWPORT_LINES / 2));
+					offset = Math.min(maxOffset, offset + Math.floor(viewportLines / 2));
 					pendingG = false;
 				} else if (matchesKey(data, "home")) {
 					offset = 0;
