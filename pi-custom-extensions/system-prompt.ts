@@ -127,11 +127,11 @@ async function showScrollableText(
 				} else if (data === "j" || matchesKey(data, "down")) {
 					offset = Math.min(maxOffset, offset + 1);
 					pendingG = false;
-				} else if (matchesKey(data, "pageup") || data === "\x15") {
+				} else if (matchesKey(data, "pageUp") || data === "\x15") {
 					// Ctrl+u = half page up
 					offset = Math.max(0, offset - Math.floor(VIEWPORT_LINES / 2));
 					pendingG = false;
-				} else if (matchesKey(data, "pagedown") || data === "\x04") {
+				} else if (matchesKey(data, "pageDown") || data === "\x04") {
 					// Ctrl+d = half page down
 					offset = Math.min(maxOffset, offset + Math.floor(VIEWPORT_LINES / 2));
 					pendingG = false;

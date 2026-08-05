@@ -1,0 +1,17 @@
+{
+  "name": "llm-garage-pi-custom-extensions",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "latest",
+    "@earendil-works/pi-ai": "latest",
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest",
+    "@types/node": "24.12.4",
+    "typebox": "latest",
+    "typescript": "5.9.3"
+  }
+}

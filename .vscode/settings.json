@@ -1,0 +1,3 @@
+{
+  "typescript.tsdk": "${workspaceFolder}/pi-custom-extensions/node_modules/typescript/lib"
+}

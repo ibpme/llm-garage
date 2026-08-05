@@ -1,4 +1,12 @@
 build/
 __pycache__/
 *.pyc
-node_modules/*
+**/node_modules/
+
+# Dependency lockfiles are intentionally not tracked; use the current Pi release.
+**/bun.lock
+**/bun.lockb
+**/package-lock.json
+**/npm-shrinkwrap.json
+**/pnpm-lock.yaml
+**/yarn.lock
