@@ -23,6 +23,7 @@ type Mode = "yolo" | "safe";
 const BLOCKED_TOOLS = new Set(["write", "edit", "bash"]);
 const SAFE_EXTRA_TOOLS = new Set(["grep", "find", "ls"]);
 const CHANGE_MODE_TOOL = "change_mode";
+const SAFE_ONLY_TOOLS = new Set([...SAFE_EXTRA_TOOLS, CHANGE_MODE_TOOL]);
 const STATUS_ID = "mode";
 const SAFE_MODE_CUSTOM_TYPE = "safe-mode-context";
 
@@ -75,8 +76,22 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus(STATUS_ID, statusLabel(ctx));
   }
 
+  function removeSafeOnlyTools() {
+    const active = pi.getActiveTools();
+    const kept = active.filter((name) => !SAFE_ONLY_TOOLS.has(name));
+    if (kept.length !== active.length) {
+      pi.setActiveTools(kept);
+    }
+  }
+
   function setMode(next: Mode, ctx: ExtensionContext) {
-    if (next === mode) return;
+    if (next === mode) {
+      if (next === "yolo") {
+        removeSafeOnlyTools();
+      }
+      applyStatus(ctx);
+      return;
+    }
 
     if (next === "safe") {
       preSafeTools = pi.getActiveTools();
@@ -89,15 +104,18 @@ export default function (pi: ExtensionAPI) {
     } else if (preSafeTools) {
       // Preserve non-mode tool changes made while SAFE was active (for
       // example through /tools), while restoring tools removed by SAFE.
-      const modeOnlyTools = new Set([...SAFE_EXTRA_TOOLS, CHANGE_MODE_TOOL]);
       const current = pi
         .getActiveTools()
-        .filter((name) => !modeOnlyTools.has(name));
+        .filter((name) => !SAFE_ONLY_TOOLS.has(name));
       const restored = preSafeTools.filter(
         (name) => BLOCKED_TOOLS.has(name) && !current.includes(name),
       );
       pi.setActiveTools([...new Set([...current, ...restored])]);
       preSafeTools = null;
+    }
+
+    if (next === "yolo") {
+      removeSafeOnlyTools();
     }
 
     mode = next;
@@ -213,12 +231,9 @@ export default function (pi: ExtensionAPI) {
     mode = "yolo";
     preSafeTools = null;
 
-    // change_mode is safe-mode-only. Remove it if registration made it active
-    // before this session-start handler ran.
-    const active = pi.getActiveTools();
-    if (active.includes(CHANGE_MODE_TOOL)) {
-      pi.setActiveTools(active.filter((name) => name !== CHANGE_MODE_TOOL));
-    }
+    // Safe-only tools may be active before this handler runs, either because
+    // they were registered during startup or restored by another extension.
+    removeSafeOnlyTools();
     applyStatus(ctx);
   });
 
@@ -269,6 +284,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("turn_start", async (_event, ctx) => {
+    // Re-apply the YOLO invariant in case another extension restored a
+    // persisted tool selection after session_start.
+    if (mode === "yolo") {
+      removeSafeOnlyTools();
+    }
     applyStatus(ctx);
   });
 }
