@@ -416,7 +416,8 @@ export function createStylishBashTool(
       ensureState(context);
       const command = String(args.command ?? "");
       const tag = renderTag(theme, getTag());
-      const text = theme.fg("toolTitle", theme.bold("$ bash ")) + theme.fg("accent", command) + tag;
+      const text =
+        theme.fg("toolTitle", theme.bold("$ bash")) + tag + " " + theme.fg("accent", command);
       return new Text(text, 0, 0);
     },
 
@@ -480,14 +481,15 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const tag = renderTag(theme, getTag());
       const path = String(args.path ?? "");
       const skill = isSkillPath(path);
-      const prefix = skill ? "✦ skill " : "▸ read ";
+      const prefix = skill ? "✦ skill" : "▸ read";
       const line =
         theme.fg("toolTitle", theme.bold(prefix)) +
+        tag +
+        " " +
         (skill
           ? theme.fg("mdLink", skillNameFromPath(path)) + theme.fg("dim", ` ${path}`)
           : theme.fg("accent", path)) +
-        suffix +
-        tag;
+        suffix;
       return new PlainLines([line]);
     },
 
@@ -552,7 +554,11 @@ export function createStylishEditTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const suffix = editCount > 1 ? theme.fg("dim", ` (${editCount} edits)`) : "";
       const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("✎ edit ")) + theme.fg("accent", String(args.path ?? "")) + suffix + tag;
+        theme.fg("toolTitle", theme.bold("✎ edit")) +
+        tag +
+        " " +
+        theme.fg("accent", String(args.path ?? "")) +
+        suffix;
       return new PlainLines([line]);
     },
 
@@ -624,10 +630,11 @@ export function createStylishWriteTool(cwd: string, timers: Set<NodeJS.Timeout>,
       const lineCount = String(args.content ?? "").split("\n").length;
       const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("✎ write ")) +
+        theme.fg("toolTitle", theme.bold("✎ write")) +
+        tag +
+        " " +
         theme.fg("accent", String(args.path ?? "")) +
-        theme.fg("dim", ` (${lineCount} lines)`) +
-        tag;
+        theme.fg("dim", ` (${lineCount} lines)`);
       return new PlainLines([line]);
     },
 
@@ -685,7 +692,11 @@ export function createStylishGrepTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const path = args.path ? theme.fg("dim", ` in ${args.path}`) : "";
       const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("⌕ grep ")) + theme.fg("accent", String(args.pattern ?? "")) + path + tag;
+        theme.fg("toolTitle", theme.bold("⌕ grep")) +
+        tag +
+        " " +
+        theme.fg("accent", String(args.pattern ?? "")) +
+        path;
       return new PlainLines([line]);
     },
 
@@ -741,7 +752,8 @@ export function createStylishLsTool(cwd: string, timers: Set<NodeJS.Timeout>, op
     renderCall(args, theme, context) {
       ensureState(context);
       const tag = renderTag(theme, getTag());
-      const line = theme.fg("toolTitle", theme.bold("▸ ls ")) + theme.fg("accent", String(args.path ?? ".")) + tag;
+      const line =
+        theme.fg("toolTitle", theme.bold("▸ ls")) + tag + " " + theme.fg("accent", String(args.path ?? "."));
       return new PlainLines([line]);
     },
 
@@ -799,7 +811,11 @@ export function createStylishFindTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const path = args.path ? theme.fg("dim", ` in ${args.path}`) : "";
       const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("⌕ find ")) + theme.fg("accent", String(args.pattern ?? "")) + path + tag;
+        theme.fg("toolTitle", theme.bold("⌕ find")) +
+        tag +
+        " " +
+        theme.fg("accent", String(args.pattern ?? "")) +
+        path;
       return new PlainLines([line]);
     },
 
