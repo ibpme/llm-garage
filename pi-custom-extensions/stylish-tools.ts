@@ -289,6 +289,28 @@ function tagLabel(baseLabel: string, tag: string | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Skill-read detection — pi has no dedicated "load skill" tool; per
+// dist/core/skills.js's formatSkillsForPrompt, the model is instructed to
+// `read` a skill's SKILL.md (or, for ~/.pi/agent/skills & .pi/skills, a root
+// .md file directly under a skills/ dir) itself. We just recognize that
+// shape of a read call and style it distinctly.
+// ---------------------------------------------------------------------------
+
+const SKILL_MD_RE = /(?:^|\/)SKILL\.md$/i;
+const SKILL_ROOT_MD_RE = /(?:^|\/)skills\/[^/]+\.md$/i;
+
+function isSkillPath(path: string): boolean {
+  return SKILL_MD_RE.test(path) || SKILL_ROOT_MD_RE.test(path);
+}
+
+function skillNameFromPath(path: string): string {
+  const parts = path.split("/");
+  const base = parts[parts.length - 1] ?? path;
+  if (/^SKILL\.md$/i.test(base)) return parts[parts.length - 2] ?? base;
+  return base.replace(/\.md$/i, "");
+}
+
+// ---------------------------------------------------------------------------
 // Operations-override registry — how other extensions redirect read/write/
 // edit/bash without registering their own tool of the same name.
 // ---------------------------------------------------------------------------
@@ -456,8 +478,16 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       if (args.limit) extra.push(`limit=${args.limit}`);
       const suffix = extra.length ? theme.fg("dim", ` (${extra.join(", ")})`) : "";
       const tag = renderTag(theme, getTag());
+      const path = String(args.path ?? "");
+      const skill = isSkillPath(path);
+      const prefix = skill ? "✦ skill " : "▸ read ";
       const line =
-        theme.fg("toolTitle", theme.bold("▸ read ")) + theme.fg("accent", String(args.path ?? "")) + suffix + tag;
+        theme.fg("toolTitle", theme.bold(prefix)) +
+        (skill
+          ? theme.fg("mdLink", skillNameFromPath(path)) + theme.fg("dim", ` ${path}`)
+          : theme.fg("accent", path)) +
+        suffix +
+        tag;
       return new PlainLines([line]);
     },
 
@@ -469,6 +499,7 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const details = result.details as ReadToolDetails | undefined;
       const content = result.content[0];
       const tag = getTag();
+      const skill = isSkillPath(String(context.args?.path ?? ""));
 
       if (content?.type === "image") {
         const extras = tag ? ["remote", "image"] : ["image"];
@@ -482,13 +513,14 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
       const lines = text ? text.split("\n") : [];
       const extras = [`${lines.length} line${lines.length === 1 ? "" : "s"}`];
       if (details?.truncation?.truncated) extras.push(`truncated of ${details.truncation.totalLines}`);
+      if (skill) extras.unshift("skill");
       if (tag) extras.unshift("remote");
 
       const statusLine = formatStatusLine(theme, status, state, extras, expanded);
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines)]);
 
       const body = capLines(lines.map((l) => theme.fg("toolOutput", l)), theme);
-      return new IndicatorBlock(tagLabel("read", tag), theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel(skill ? "skill" : "read", tag), theme, status, body, statusLine);
     },
   });
 }
