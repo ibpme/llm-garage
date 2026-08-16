@@ -14,6 +14,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	SessionEntry,
+	Theme,
 } from "@earendil-works/pi-coding-agent";
 import { openPager, textSource } from "./shared/pager.ts";
 
@@ -93,36 +94,46 @@ function sessionTotal(overall: Map<string, ToolStat>): number {
 	return total;
 }
 
-function formatTable(tools: Map<string, ToolStat>): string[] {
-	if (tools.size === 0) return ["  (none)"];
+function formatTable(tools: Map<string, ToolStat>, theme: Theme): string[] {
+	if (tools.size === 0) return [theme.fg("dim", "  (none)")];
 
 	const entries = Array.from(tools.entries()).sort((a, b) => b[1].count - a[1].count);
 	const nameWidth = Math.max(4, ...entries.map(([name]) => name.length));
 
 	const lines = entries.map(([name, stat]) => {
-		const namePart = name.padEnd(nameWidth);
-		const countPart = `calls: ${stat.count}`.padEnd(12);
-		const errorsPart = stat.errors > 0 ? `errors: ${stat.errors}` : "";
+		const namePart = theme.fg("accent", name.padEnd(nameWidth));
+		const countPart = theme.fg("text", `calls: ${stat.count}`.padEnd(12));
+		const errorsPart =
+			stat.errors > 0 ? theme.fg("error", `errors: ${stat.errors}`) : "";
 		return `  ${namePart}  ${countPart}${errorsPart}`;
 	});
 
 	return lines;
 }
 
-function formatDetail(stats: Stats): string {
+function formatDetail(stats: Stats, theme: Theme): string {
 	const lines: string[] = [];
 	const total = sessionTotal(stats.overall);
 
-	lines.push(`Total tool calls: ${total} across ${stats.overall.size} tool(s)`);
+	lines.push(
+		theme.fg("text", "Total tool calls: ") +
+			theme.fg("accent", `${total}`) +
+			theme.fg("text", " across ") +
+			theme.fg("accent", `${stats.overall.size}`) +
+			theme.fg("text", " tool(s)"),
+	);
 	lines.push("");
-	lines.push("By tool (whole conversation):");
-	lines.push(...formatTable(stats.overall));
+	lines.push(theme.bold(theme.fg("accent", "By tool (whole conversation):")));
+	lines.push(...formatTable(stats.overall, theme));
 
 	for (const turn of stats.turns) {
 		if (turn.total === 0) continue;
 		lines.push("");
-		lines.push(`Turn ${turn.turnNumber} (${turn.total} call${turn.total === 1 ? "" : "s"}):`);
-		lines.push(...formatTable(turn.tools));
+		lines.push(
+			theme.bold(theme.fg("accent", `Turn ${turn.turnNumber}`)) +
+				theme.fg("dim", ` (${turn.total} call${turn.total === 1 ? "" : "s"}):`),
+		);
+		lines.push(...formatTable(turn.tools, theme));
 	}
 
 	return lines.join("\n");
@@ -130,29 +141,36 @@ function formatDetail(stats: Stats): string {
 
 const MAX_STATUS_TOOLS_SHOWN = 4;
 
-function formatBreakdown(tools: Map<string, ToolStat>): string {
-	if (tools.size === 0) return "none";
+function formatBreakdown(tools: Map<string, ToolStat>, theme: Theme): string {
+	if (tools.size === 0) return theme.fg("dim", "none");
 
 	const entries = Array.from(tools.entries()).sort((a, b) => b[1].count - a[1].count);
 	const shown = entries
 		.slice(0, MAX_STATUS_TOOLS_SHOWN)
-		.map(([name, stat]) => `${name}×${stat.count}`)
-		.join(", ");
+		.map(
+			([name, stat]) =>
+				theme.fg("accent", name) +
+				theme.fg("dim", "×") +
+				theme.fg(stat.errors > 0 ? "error" : "muted", `${stat.count}`),
+		)
+		.join(theme.fg("dim", ", "));
 	const overflow = entries.length - MAX_STATUS_TOOLS_SHOWN;
 
-	return overflow > 0 ? `${shown}, +${overflow}` : shown;
+	return overflow > 0 ? `${shown}${theme.fg("dim", `, +${overflow}`)}` : shown;
 }
 
 function formatStatus(ctx: ExtensionContext, stats: Stats): string {
 	const { theme } = ctx.ui;
 	const total = sessionTotal(stats.overall);
 	const currentTurn = stats.turns[stats.turns.length - 1];
-	const breakdown = formatBreakdown(currentTurn?.tools ?? new Map());
+	const breakdown = formatBreakdown(currentTurn?.tools ?? new Map(), theme);
 
 	return (
 		theme.fg("dim", "tool-call(s): ") +
-		theme.fg("muted", breakdown) +
-		theme.fg("dim", ` (${total} total)`)
+		breakdown +
+		theme.fg("dim", " (") +
+		theme.fg("warning", `${total}`) +
+		theme.fg("dim", " total)")
 	);
 }
 
@@ -170,7 +188,7 @@ export default function toolCallStatsExtension(pi: ExtensionAPI) {
 		description: "Show tool call counts and errors, overall and per turn",
 		handler: async (_args, ctx) => {
 			const stats = computeStats(ctx.sessionManager.getBranch());
-			const text = formatDetail(stats);
+			const text = formatDetail(stats, ctx.ui.theme);
 
 			await openPager(ctx, {
 				title: "Tool Call Detail",
