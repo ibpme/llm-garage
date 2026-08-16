@@ -22,8 +22,22 @@ const MAX_TOOLS_SHOWN = 6;
 
 function formatTools(pi: ExtensionAPI, ctx: ExtensionContext): string {
   const { theme } = ctx.ui;
-  const tools = pi.getActiveTools();
-  if (tools.length === 0) return theme.fg("dim", "none");
+  const active = pi.getActiveTools();
+  if (active.length === 0) return theme.fg("dim", "none");
+
+  // Pi builtins first (in their original order), then everything else
+  // (extension/SDK-registered tools), so the always-present core tools
+  // aren't pushed out of view by the "+N" overflow when the list is long.
+  const builtinNames = new Set(
+    pi
+      .getAllTools()
+      .filter((tool) => tool.sourceInfo.source === "builtin")
+      .map((tool) => tool.name),
+  );
+  const tools = [
+    ...active.filter((name) => builtinNames.has(name)),
+    ...active.filter((name) => !builtinNames.has(name)),
+  ];
 
   let text = theme.fg("muted", tools.slice(0, MAX_TOOLS_SHOWN).join(", "));
   if (tools.length > MAX_TOOLS_SHOWN) {
