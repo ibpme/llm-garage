@@ -4,6 +4,34 @@ This directory contains the TypeScript extensions used by the personal Pi config
 
 The setup is intended for local VS Code and TypeScript development. Pi itself may be installed globally, but the TypeScript language service needs local copies of the package declarations in order to resolve imports and provide autocomplete.
 
+## Structure
+
+Pi discovers two shapes of extension, and this directory uses both:
+
+| Path | Loaded as |
+|---|---|
+| `<name>.ts` | a single-file extension |
+| `<name>/index.ts` | a multi-file extension, with helpers next to it |
+| `shared/*.ts` | **not** an extension — see below |
+
+`shared/` holds helpers imported by more than one extension (`pager.ts`,
+`message-text.ts`, `tool-guard.ts`). Pi's loader skips a subdirectory that
+has neither an `index.ts` nor a `package.json` with a `pi` field, so
+`shared/` must **never gain an `index.ts`** — that would load it as a
+broken extension.
+
+Everything in `shared/` must be **stateless**. Pi loads each extension with
+its own jiti instance and `moduleCache: false`, so a module imported by two
+extensions is instantiated twice: module-level variables are not shared and
+a singleton there would silently split in two. Anything that genuinely
+needs shared state must either live inside one extension (see `tool-set/`,
+which merged the old `mode.ts` and `tools.ts` for exactly this reason) or
+go through pi — `pi.events`, `pi.getActiveTools()`, or session entries.
+
+Relative imports carry an explicit `.ts` extension (`./shared/pager.ts`),
+matching pi's own multi-file extension examples, since jiti resolves the
+specifier as written.
+
 ## Prerequisites
 
 - A clone of this repository

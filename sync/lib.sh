@@ -63,6 +63,34 @@ link_dir_contents() {
   shopt -u nullglob
 }
 
+# link_pi_extensions SRC_DIR DEST_DIR
+# Like link_dir_contents, but links only what pi's extension loader can
+# discover: top-level *.ts files and subdirectories containing index.ts. Dev
+# scaffolding (package.json, tsconfig.json, lockfiles, README.md,
+# node_modules/) stays out of the extension directory.
+#
+# shared/ is linked deliberately even though it is not an extension: pi skips
+# a subdirectory with no index.ts and no "pi" manifest, but extension files
+# import from it relatively, so it has to exist alongside them.
+link_pi_extensions() {
+  local src_dir="$1" dest_dir="$2" entry name
+  [ -d "$src_dir" ] || return 0
+  mkdir -p "$dest_dir"
+  shopt -s nullglob
+  for entry in "$src_dir"/*.ts; do
+    link_one "$entry" "$dest_dir/$(basename "$entry")"
+  done
+  for entry in "$src_dir"/*/; do
+    entry="${entry%/}"
+    name="$(basename "$entry")"
+    [ "$name" = "node_modules" ] && continue
+    if [ -f "$entry/index.ts" ] || [ "$name" = "shared" ]; then
+      link_one "$entry" "$dest_dir/$name"
+    fi
+  done
+  shopt -u nullglob
+}
+
 # unlink_one DEST
 # Reverses link_one: removes DEST only if it's a symlink pointing into this
 # repo (never touches anything else), then restores the newest

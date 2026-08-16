@@ -6,25 +6,24 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerToolGuard } from "./shared/tool-guard.ts";
 
-export default function (pi: ExtensionAPI) {
-  const protectedPaths = [".env", ".git/", "node_modules/", ".venv"];
+const PROTECTED_PATHS = [".git/", "node_modules/", ".venv"];
 
-  pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName !== "write" && event.toolName !== "edit") {
-      return undefined;
-    }
+export default function(pi: ExtensionAPI) {
+  registerToolGuard(pi, [
+    {
+      tools: ["write", "edit"],
+      check: (event) => {
+        const path = event.input.path as string;
+        if (!PROTECTED_PATHS.some((p) => path.includes(p))) return undefined;
 
-    const path = event.input.path as string;
-    const isProtected = protectedPaths.some((p) => path.includes(p));
-
-    if (isProtected) {
-      if (ctx.hasUI) {
-        ctx.ui.notify(`Blocked write to protected path: ${path}`, "warning");
-      }
-      return { block: true, reason: `Path "${path}" is protected` };
-    }
-
-    return undefined;
-  });
+        return {
+          action: "block",
+          reason: `Path "${path}" is protected`,
+          notify: `Blocked write to protected path: ${path}`,
+        };
+      },
+    },
+  ]);
 }

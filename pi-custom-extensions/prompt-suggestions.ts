@@ -18,6 +18,7 @@ import {
   type TUI,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import { extractTextParts } from "./shared/message-text.ts";
 
 const CONFIG_DIR = join(homedir(), ".pi", "agent");
 const CONFIG_PATH = join(CONFIG_DIR, "prompt-suggestions.json");
@@ -327,23 +328,6 @@ async function saveEnabled(enabled: boolean): Promise<void> {
   await writeFile(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  return content
-    .filter((part): part is { type: "text"; text: string } => {
-      return (
-        !!part &&
-        typeof part === "object" &&
-        (part as { type?: unknown }).type === "text" &&
-        typeof (part as { text?: unknown }).text === "string"
-      );
-    })
-    .map((part) => part.text)
-    .join("\n");
-}
-
 function serializeContext(ctx: ExtensionContext): string {
   const entries = ctx.sessionManager.buildContextEntries();
   const sections: string[] = [];
@@ -368,7 +352,7 @@ function serializeContext(ctx: ExtensionContext): string {
       continue;
     }
 
-    const text = contentText(message.content).trim();
+    const text = extractTextParts(message.content).trim();
     if (!text) continue;
 
     const role =

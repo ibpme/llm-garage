@@ -19,8 +19,8 @@ link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
 python3 "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.claude/skills","~/.codex/skills"]'
 
 # Symlink custom extensions from this repo into pi's extensions dir
-# (individual file links, so pi-specific local extensions stay untouched).
-link_dir_contents "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
+# (individual entry links, so pi-specific local extensions stay untouched).
+link_pi_extensions "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
 # Install mutable extension defaults once. Unlike extensions and keybindings,
 # this must be a normal file: the extension updates it when the user toggles

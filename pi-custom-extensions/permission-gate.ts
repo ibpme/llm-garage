@@ -6,29 +6,31 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerToolGuard } from "./shared/tool-guard.ts";
 
-export default function (pi: ExtensionAPI) {
-	const dangerousPatterns = [/\brm\s+(-rf?|--recursive)/i, /\bsudo\b/i, /\b(chmod|chown)\b.*777/i];
+const DANGEROUS_PATTERNS = [
+  /\brm\s+(-rf?|--recursive)/i,
+  /\bsudo\b/i,
+  /\b(chmod|chown)\b.*777/i,
+];
 
-	pi.on("tool_call", async (event, ctx) => {
-		if (event.toolName !== "bash") return undefined;
+export default function(pi: ExtensionAPI) {
+  registerToolGuard(pi, [
+    {
+      tools: ["bash"],
+      check: (event) => {
+        const command = event.input.command as string;
+        if (!DANGEROUS_PATTERNS.some((pattern) => pattern.test(command))) {
+          return undefined;
+        }
 
-		const command = event.input.command as string;
-		const isDangerous = dangerousPatterns.some((p) => p.test(command));
-
-		if (isDangerous) {
-			if (!ctx.hasUI) {
-				// In non-interactive mode, block by default
-				return { block: true, reason: "Dangerous command blocked (no UI for confirmation)" };
-			}
-
-			const choice = await ctx.ui.select(`⚠️ Dangerous command:\n\n  ${command}\n\nAllow?`, ["Yes", "No"]);
-
-			if (choice !== "Yes") {
-				return { block: true, reason: "Blocked by user" };
-			}
-		}
-
-		return undefined;
-	});
+        return {
+          action: "confirm",
+          prompt: `Dangerous command:\n\n  ${command}\n\nAllow?`,
+          denyReason: "Blocked by user",
+          noUIReason: "Dangerous command blocked (no UI for confirmation)",
+        };
+      },
+    },
+  ]);
 }
