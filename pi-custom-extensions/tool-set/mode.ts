@@ -11,7 +11,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { ToolSet } from "./state.ts";
 
-const STATUS_ID = "mode";
+/**
+ * Published as two entries so a custom footer can place the badge on its own
+ * line while the tool list stays in the generic extension-status line.
+ * status-line.ts hoists MODE_STATUS_ID; everything else falls through.
+ */
+const MODE_STATUS_ID = "mode";
+const TOOLS_STATUS_ID = "tools";
 const MAX_TOOLS_SHOWN = 6;
 
 function formatTools(pi: ExtensionAPI, ctx: ExtensionContext): string {
@@ -26,21 +32,18 @@ function formatTools(pi: ExtensionAPI, ctx: ExtensionContext): string {
 	return text;
 }
 
-function statusLabel(
-	pi: ExtensionAPI,
-	toolSet: ToolSet,
-	ctx: ExtensionContext,
-): string {
+function modeLabel(toolSet: ToolSet, ctx: ExtensionContext): string {
 	const { theme } = ctx.ui;
-	const modeLabel =
+	const badge =
 		toolSet.getMode() === "safe"
 			? theme.bold(theme.fg("success", "⏸ SAFE"))
 			: theme.bold(theme.fg("error", "⏵⏵ YOLO"));
 
-	return [
-		modeLabel + theme.fg("text", "\t(shift+tab to toggle)"),
-		theme.fg("dim", "tools:") + formatTools(pi, ctx),
-	].join(theme.fg("dim", " · "));
+	return badge + theme.fg("dim", " (shift+tab)");
+}
+
+function toolsLabel(pi: ExtensionAPI, ctx: ExtensionContext): string {
+	return ctx.ui.theme.fg("dim", "tools:") + formatTools(pi, ctx);
 }
 
 export function registerMode(pi: ExtensionAPI, toolSet: ToolSet) {
@@ -53,7 +56,8 @@ export function registerMode(pi: ExtensionAPI, toolSet: ToolSet) {
 
 	function applyStatus(ctx: ExtensionContext) {
 		lastCtx = ctx;
-		ctx.ui.setStatus(STATUS_ID, statusLabel(pi, toolSet, ctx));
+		ctx.ui.setStatus(MODE_STATUS_ID, modeLabel(toolSet, ctx));
+		ctx.ui.setStatus(TOOLS_STATUS_ID, toolsLabel(pi, ctx));
 	}
 
 	toolSet.onChange(() => {

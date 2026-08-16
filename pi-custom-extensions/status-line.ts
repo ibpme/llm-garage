@@ -16,6 +16,16 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const BAR_WIDTH = 40;
 
+/** Extension status hoisted onto line 2 instead of the trailing status line. */
+const INLINE_STATUS_KEY = "mode";
+
+function sanitizeStatus(text: string): string {
+  return text
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+}
+
 function formatTokens(count: number): string {
   if (count < 1000) return `${count}`;
   if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -136,6 +146,15 @@ export default function statusLineExtension(pi: ExtensionAPI) {
             `${bar} ${theme.fg(color, percentText)}${theme.fg("dim", `/${formatTokens(contextWindow)}`)}`,
           );
 
+          const extensionStatuses = footerData.getExtensionStatuses();
+
+          // Prepended rather than appended so the width truncation below eats
+          // the stats before it eats the mode badge.
+          const inlineStatus = extensionStatuses.get(INLINE_STATUS_KEY);
+          if (inlineStatus) {
+            statParts.unshift(sanitizeStatus(inlineStatus));
+          }
+
           let statsLeft = statParts.join(theme.fg("dim", " · "));
 
           const modelName = ctx.model?.id || "no-model";
@@ -159,19 +178,17 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const lines = [line1, line2];
 
-          const extensionStatuses = footerData.getExtensionStatuses();
-          if (extensionStatuses.size > 0) {
-            const statusLine = Array.from(extensionStatuses.entries())
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([, text]) =>
-                text
-                  .replace(/[\r\n\t]/g, " ")
-                  .replace(/ +/g, " ")
-                  .trim(),
-              )
-              .join(theme.fg("dim", " · "));
+          const rest = Array.from(extensionStatuses.entries())
+            .filter(([key]) => key !== INLINE_STATUS_KEY)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, text]) => sanitizeStatus(text));
+          if (rest.length > 0) {
             lines.push(
-              truncateToWidth(statusLine, width, theme.fg("dim", "...")),
+              truncateToWidth(
+                rest.join(theme.fg("dim", " · ")),
+                width,
+                theme.fg("dim", "..."),
+              ),
             );
           }
 
