@@ -14,7 +14,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
-const BAR_WIDTH = 40;
+const BAR_WIDTH = 10;
 
 /** Extension status hoisted onto line 2 instead of the trailing status line. */
 const INLINE_STATUS_KEY = "mode";
@@ -41,8 +41,8 @@ function formatCwd(cwd: string, home: string | undefined): string {
 }
 
 function contextColor(percent: number): "success" | "warning" | "error" {
-  if (percent > 90) return "error";
-  if (percent > 70) return "warning";
+  if (percent > 70) return "error";
+  if (percent > 40) return "warning";
   return "success";
 }
 
@@ -142,8 +142,9 @@ export default function statusLineExtension(pi: ExtensionAPI) {
             theme.fg("dim", "░".repeat(BAR_WIDTH - filled));
           const percentText =
             contextUsage?.percent != null ? `${percent.toFixed(0)}%` : "?";
+          const usedTokens = contextUsage?.tokens ?? 0;
           statParts.push(
-            `${bar} ${theme.fg(color, percentText)}${theme.fg("dim", `/${formatTokens(contextWindow)}`)}`,
+            `${bar} ${theme.fg(color, percentText)}${theme.fg("dim", ` ${formatTokens(usedTokens)}/${formatTokens(contextWindow)}`)}`,
           );
 
           const extensionStatuses = footerData.getExtensionStatuses();
