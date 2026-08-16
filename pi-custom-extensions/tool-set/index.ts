@@ -22,10 +22,32 @@ import { registerMode } from "./mode.ts";
 import { persistSelection, restoreSelection } from "./persistence.ts";
 import { registerPicker } from "./picker.ts";
 import { registerSafeContext } from "./safe-context.ts";
-import { BLOCKED_TOOLS, CHANGE_MODE_TOOL, createToolSet } from "./state.ts";
+import { BLOCKED_TOOLS, CHANGE_MODE_TOOL, createToolSet, type ToolSet } from "./state.ts";
+
+/**
+ * The running ToolSet instance, for other extensions (e.g. ssh.ts) that need
+ * to add/remove tools from the user's selection without fighting this
+ * extension over `pi.setActiveTools`.
+ *
+ * Stored on globalThis rather than a plain module-level variable: pi loads
+ * extensions via jiti with `moduleCache: false`, so a separately-loaded
+ * extension's own `import ... from "./tool-set/index.ts"` gets its own
+ * fresh copy of this module (a different `sharedToolSet` binding) rather
+ * than the instance pi actually invoked as the "tool-set" extension. A
+ * `Symbol.for` key on the process-wide globalThis is the one thing every
+ * copy of this module actually shares.
+ */
+const TOOL_SET_GLOBAL_KEY = Symbol.for("llm-garage.pi-custom-extensions.tool-set");
+
+export function getToolSet(): ToolSet {
+	const toolSet = (globalThis as Record<symbol, unknown>)[TOOL_SET_GLOBAL_KEY] as ToolSet | undefined;
+	if (!toolSet) throw new Error("tool-set extension has not loaded yet");
+	return toolSet;
+}
 
 export default function toolSetExtension(pi: ExtensionAPI) {
 	const toolSet = createToolSet(pi);
+	(globalThis as Record<symbol, unknown>)[TOOL_SET_GLOBAL_KEY] = toolSet;
 
 	const applyStatus = registerMode(pi, toolSet);
 	registerChangeModeTool(pi, toolSet);

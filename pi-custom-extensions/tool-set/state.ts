@@ -44,6 +44,12 @@ export interface ToolSet {
 	setSelection(names: readonly string[]): void;
 	/** Seed the selection from whatever pi currently has active. */
 	adoptHostSelection(): void;
+	/**
+	 * Extend BLOCKED_TOOLS so SAFE mode also removes these names, e.g. a
+	 * remote-tool variant registered by another extension. Mutates the same
+	 * Set mask() reads, so it takes effect immediately.
+	 */
+	addBlockedTools(names: readonly string[]): void;
 	/** Notified after any change that has been applied to pi. */
 	onChange(listener: () => void): () => void;
 }
@@ -104,6 +110,10 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 				.getActiveTools()
 				.filter((name) => !SAFE_ONLY_TOOLS.has(name));
 			apply();
+		},
+
+		addBlockedTools(names) {
+			for (const name of names) BLOCKED_TOOLS.add(name);
 		},
 
 		onChange(listener) {

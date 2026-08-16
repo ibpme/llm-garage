@@ -22,6 +22,20 @@
  *   tool (not just bash), via a shared per-call render state.
  * - Vivid color usage: tool label/args get accent/toolTitle, not just
  *   status.
+ *
+ * Composability with other extensions (e.g. ssh.ts):
+ * - read/write/edit/bash's *execute* consults a shared, mutable
+ *   operations-override registry (see `setOperationsOverride` /
+ *   `clearOperationsOverride`) instead of hard-coding local operations.
+ *   Another extension can redirect a built-in tool's I/O (to run over
+ *   SSH, a container, etc.) without ever calling registerTool() for
+ *   these names itself — avoiding the "first registration per name
+ *   wins" shadowing that pi's extension loader does across extensions.
+ * - The per-tool factories (createStylishReadTool, ...WriteTool,
+ *   ...EditTool, ...BashTool) are exported so another extension can
+ *   register *differently-named* tools (e.g. "read_remote") that reuse
+ *   the exact same rendering, with their own dynamic operations source
+ *   and an optional tag shown next to the label/status line.
  */
 import {
   createBashTool,
@@ -32,22 +46,27 @@ import {
   createLsTool,
   createReadTool,
   createWriteTool,
+  defineTool,
   keyHint,
+  type BashOperations,
   type BashToolDetails,
+  type EditOperations,
   type EditToolDetails,
   type ExtensionAPI,
   type FindToolDetails,
   type GrepToolDetails,
   type LsToolDetails,
+  type ReadOperations,
   type ReadToolDetails,
   type Theme,
+  type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import { type Component, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
-type IndicatorColor = "borderAccent" | "success" | "warning" | "error";
-type Status = "running" | "success" | "error" | "aborted" | "timeout";
+export type IndicatorColor = "borderAccent" | "success" | "warning" | "error";
+export type Status = "running" | "success" | "error" | "aborted" | "timeout";
 
-interface RenderState {
+export interface RenderState {
   startedAt?: number;
   endedAt?: number;
   interval?: NodeJS.Timeout;
@@ -68,7 +87,7 @@ const EXPANDED_CAP = 40;
 // Shared status/indicator/timer machinery
 // ---------------------------------------------------------------------------
 
-function getIndicatorColor(status: Status): IndicatorColor {
+export function getIndicatorColor(status: Status): IndicatorColor {
   switch (status) {
     case "success":
       return "success";
@@ -83,7 +102,7 @@ function getIndicatorColor(status: Status): IndicatorColor {
   }
 }
 
-function getStatusIcon(status: Status): string {
+export function getStatusIcon(status: Status): string {
   switch (status) {
     case "running":
       return "⟳";
@@ -98,7 +117,7 @@ function getStatusIcon(status: Status): string {
   }
 }
 
-function getStatusColor(status: Status): "success" | "error" | "warning" | "muted" {
+export function getStatusColor(status: Status): "success" | "error" | "warning" | "muted" {
   switch (status) {
     case "success":
       return "muted";
@@ -112,19 +131,19 @@ function getStatusColor(status: Status): "success" | "error" | "warning" | "mute
   }
 }
 
-function formatDuration(state: RenderState, now = Date.now()): string {
+export function formatDuration(state: RenderState, now = Date.now()): string {
   if (state.startedAt === undefined) return "";
   const end = state.endedAt ?? now;
   return `${((end - state.startedAt) / 1000).toFixed(2)}s`;
 }
 
-function ensureState(context: { state: unknown }): RenderState {
+export function ensureState(context: { state: unknown }): RenderState {
   const state = context.state as RenderState;
   state.status ??= "running";
   return state;
 }
 
-function updateRenderState(
+export function updateRenderState(
   context: { state: unknown; executionStarted: boolean; invalidate: () => void },
   isPartial: boolean,
   isError: boolean,
@@ -157,7 +176,7 @@ function updateRenderState(
 
 // bash-specific: refine error into aborted/timeout from the built-in's own
 // footer text, same detection stylish-bash.ts used.
-function refineBashStatus(state: RenderState, output: string, isError: boolean): void {
+export function refineBashStatus(state: RenderState, output: string, isError: boolean): void {
   if (!isError) return;
   if (/Command aborted\b/.test(output)) state.status = "aborted";
   else if (/Command timed out\b/.test(output)) state.status = "timeout";
@@ -168,7 +187,7 @@ function refineBashStatus(state: RenderState, output: string, isError: boolean):
 // ---------------------------------------------------------------------------
 
 /** Plain lines, no border, no wrap — used for collapsed states. */
-class PlainLines implements Component {
+export class PlainLines implements Component {
   constructor(private lines: string[]) {}
   render(width: number): string[] {
     return this.lines.map((line) => truncateToWidth(line, width, "", true));
@@ -182,7 +201,7 @@ class PlainLines implements Component {
  * each body/footer line so the block still reads as one unit while
  * scrolling past it stays cheap (no corner/fill math, no frame padding).
  */
-class IndicatorBlock implements Component {
+export class IndicatorBlock implements Component {
   constructor(
     private label: string,
     private theme: Theme,
@@ -208,7 +227,7 @@ class IndicatorBlock implements Component {
   invalidate(): void {}
 }
 
-function formatStatusLine(
+export function formatStatusLine(
   theme: Theme,
   status: Status,
   state: RenderState,
@@ -230,63 +249,135 @@ function formatStatusLine(
   );
 }
 
-function capLines(lines: string[], theme: Theme, cap = EXPANDED_CAP): string[] {
+export function capLines(lines: string[], theme: Theme, cap = EXPANDED_CAP): string[] {
   if (lines.length <= cap) return lines;
   return [...lines.slice(0, cap), theme.fg("muted", `… ${lines.length - cap} more lines`)];
 }
 
 /** First-N-line preview for the collapsed state, dimmed. */
-function buildPreview(theme: Theme, lines: string[], limit = READ_PREVIEW_LINES): string[] {
+export function buildPreview(theme: Theme, lines: string[], limit = READ_PREVIEW_LINES): string[] {
   if (lines.length === 0) return [];
   return lines.slice(0, limit).map((l) => theme.fg("dim", l));
 }
 
-function colorDiffLine(theme: Theme, line: string): string {
+export function colorDiffLine(theme: Theme, line: string): string {
   if (line.startsWith("+") && !line.startsWith("+++")) return theme.fg("toolDiffAdded", line);
   if (line.startsWith("-") && !line.startsWith("---")) return theme.fg("toolDiffRemoved", line);
   return theme.fg("toolDiffContext", line);
 }
 
-function getTextOutput(result: { content: Array<{ type: string; text?: string }> }): string {
+export function getTextOutput(result: { content: Array<{ type: string; text?: string }> }): string {
   const texts = result.content.filter((c) => c.type === "text").map((c) => c.text ?? "");
   return texts.join("\n");
 }
 
-function countNonEmptyLines(text: string): number {
+export function countNonEmptyLines(text: string): number {
   return text.split("\n").filter((l) => l.trim().length > 0).length;
 }
 
+/** Notice appended after a label/path when operations are overridden, e.g. " (remote) user@host". */
+function renderTag(theme: Theme, tag: string | undefined): string {
+  return tag ? ` ${theme.fg("warning", "(remote)")}${theme.fg("dim", ` ${tag}`)}` : "";
+}
+
+/** Label suffix used in the expanded IndicatorBlock header when overridden. */
+function tagLabel(baseLabel: string, tag: string | undefined): string {
+  return tag ? `${baseLabel} (remote)` : baseLabel;
+}
+
 // ---------------------------------------------------------------------------
-// Extension
+// Operations-override registry — how other extensions redirect read/write/
+// edit/bash without registering their own tool of the same name.
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI) {
-  const cwd = process.cwd();
-  const timers = new Set<NodeJS.Timeout>();
+export interface OperationsOverride {
+  read?: ReadOperations;
+  write?: WriteOperations;
+  edit?: EditOperations;
+  bash?: BashOperations;
+  /** Short label shown next to the tool header/status line while active, e.g. "ssh:user@host". */
+  tag?: string;
+}
 
-  // --- bash ------------------------------------------------------------
-  const bashTool = createBashTool(cwd);
-  const bashMetadata = createBashToolDefinition(cwd);
+/**
+ * Stored on globalThis, not a plain module variable: pi loads each
+ * extension file through its own independent jiti import graph
+ * (moduleCache: false), so another extension's own
+ * `import ... from "./stylish-tools.ts"` gets a *different* copy of this
+ * module than the one pi actually invoked as the "stylish-tools"
+ * extension (the one whose read/write/edit/bash tools are live). A plain
+ * module-level `let` would mean setOperationsOverride() from that other
+ * copy silently mutates state nobody reads. Symbol.for is the one thing
+ * every copy of this module actually shares.
+ */
+const OPERATIONS_OVERRIDE_GLOBAL_KEY = Symbol.for("llm-garage.pi-custom-extensions.stylish-tools.operations-override");
 
-  pi.registerTool({
-    name: "bash",
-    label: bashMetadata.label,
-    description: bashMetadata.description,
-    promptSnippet: bashMetadata.promptSnippet,
-    promptGuidelines: bashMetadata.promptGuidelines,
-    parameters: bashMetadata.parameters,
+function readOperationsOverride(): OperationsOverride {
+  return (
+    ((globalThis as Record<symbol, unknown>)[OPERATIONS_OVERRIDE_GLOBAL_KEY] as OperationsOverride | undefined) ?? {}
+  );
+}
+
+/** Redirect read/write/edit/bash's I/O. Pass only the ops you want to override. */
+export function setOperationsOverride(next: OperationsOverride): void {
+  (globalThis as Record<symbol, unknown>)[OPERATIONS_OVERRIDE_GLOBAL_KEY] = next;
+}
+
+export function clearOperationsOverride(): void {
+  (globalThis as Record<symbol, unknown>)[OPERATIONS_OVERRIDE_GLOBAL_KEY] = {};
+}
+
+export function getOperationsOverride(): OperationsOverride {
+  return readOperationsOverride();
+}
+
+// ---------------------------------------------------------------------------
+// Per-tool factories — reused both for the base "read"/"write"/"edit"/"bash"
+// registrations below and by other extensions that want the same styling
+// under a different tool name (e.g. ssh.ts's "read_remote").
+// ---------------------------------------------------------------------------
+
+export interface StylishToolOptions<Ops> {
+  /** Tool name as seen by the LLM. Defaults to the built-in's own name. */
+  name?: string;
+  /** Appended to the description shown to the LLM. */
+  extraDescription?: string;
+  /** Dynamic operations source. Defaults to the shared operationsOverride registry. */
+  getOperations?: () => Ops | undefined;
+  /** Dynamic short tag shown next to the label/status when operations are overridden. */
+  getTag?: () => string | undefined;
+}
+
+export function createStylishBashTool(
+  cwd: string,
+  timers: Set<NodeJS.Timeout>,
+  opts: StylishToolOptions<BashOperations> = {},
+) {
+  const localTool = createBashTool(cwd);
+  const metadata = createBashToolDefinition(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().bash);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "bash",
+    label: metadata.label,
+    description: opts.extraDescription ? `${metadata.description}\n\n${opts.extraDescription}` : metadata.description,
+    promptSnippet: metadata.promptSnippet,
+    promptGuidelines: metadata.promptGuidelines,
+    parameters: metadata.parameters,
     renderShell: "self",
 
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
-      return bashTool.execute(toolCallId, params, signal, onUpdate);
+    async execute(toolCallId, params, signal, onUpdate) {
+      const ops = getOps();
+      const tool = ops ? createBashTool(cwd, { operations: ops }) : localTool;
+      return tool.execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
       const command = String(args.command ?? "");
-      const text = theme.fg("toolTitle", theme.bold("$ bash ")) + theme.fg("accent", command);
-      // Full command, wrapped across lines rather than hard-truncated — a
-      // long command shouldn't lose its tail end just to fit one line.
+      const tag = renderTag(theme, getTag());
+      const text = theme.fg("toolTitle", theme.bold("$ bash ")) + theme.fg("accent", command) + tag;
       return new Text(text, 0, 0);
     },
 
@@ -301,8 +392,10 @@ export default function (pi: ExtensionAPI) {
       const outputLines = output.split("\n").filter((_, i, arr) => !(arr.length === 1 && arr[0] === ""));
       const lineCount = output ? outputLines.length : 0;
 
+      const tag = getTag();
       const extras = [lineCount === 0 ? "no output" : `${lineCount} line${lineCount === 1 ? "" : "s"}`];
       if (details?.truncation?.truncated || details?.fullOutputPath) extras.push("truncated");
+      if (tag) extras.unshift("remote");
 
       if (!expanded) {
         const statusLine = formatStatusLine(theme, status, state, extras, expanded);
@@ -313,21 +406,27 @@ export default function (pi: ExtensionAPI) {
 
       const body = capLines(outputLines.length ? outputLines : [theme.fg("dim", "(no output)")], theme);
       const footer = formatStatusLine(theme, status, state, extras, expanded);
-      return new IndicatorBlock("bash", theme, status, body, footer);
+      return new IndicatorBlock(tagLabel("bash", tag), theme, status, body, footer);
     },
   });
+}
 
-  // --- read --------------------------------------------------------------
-  const readTool = createReadTool(cwd);
-  pi.registerTool({
-    name: "read",
+export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<ReadOperations> = {}) {
+  const localTool = createReadTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().read);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "read",
     label: "read",
-    description: readTool.description,
-    parameters: readTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return readTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      const tool = ops ? createReadTool(cwd, { operations: ops }) : localTool;
+      return tool.execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -336,8 +435,9 @@ export default function (pi: ExtensionAPI) {
       if (args.offset) extra.push(`offset=${args.offset}`);
       if (args.limit) extra.push(`limit=${args.limit}`);
       const suffix = extra.length ? theme.fg("dim", ` (${extra.join(", ")})`) : "";
+      const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("▸ read ")) + theme.fg("accent", String(args.path ?? "")) + suffix;
+        theme.fg("toolTitle", theme.bold("▸ read ")) + theme.fg("accent", String(args.path ?? "")) + suffix + tag;
       return new PlainLines([line]);
     },
 
@@ -348,11 +448,13 @@ export default function (pi: ExtensionAPI) {
       const status = state.status;
       const details = result.details as ReadToolDetails | undefined;
       const content = result.content[0];
+      const tag = getTag();
 
       if (content?.type === "image") {
-        const line = formatStatusLine(theme, status, state, ["image"], expanded);
+        const extras = tag ? ["remote", "image"] : ["image"];
+        const line = formatStatusLine(theme, status, state, extras, expanded);
         return expanded
-          ? new IndicatorBlock("read", theme, status, [theme.fg("dim", "(image content)")], line)
+          ? new IndicatorBlock(tagLabel("read", tag), theme, status, [theme.fg("dim", "(image content)")], line)
           : new PlainLines([line]);
       }
 
@@ -360,34 +462,42 @@ export default function (pi: ExtensionAPI) {
       const lines = text ? text.split("\n") : [];
       const extras = [`${lines.length} line${lines.length === 1 ? "" : "s"}`];
       if (details?.truncation?.truncated) extras.push(`truncated of ${details.truncation.totalLines}`);
+      if (tag) extras.unshift("remote");
 
       const statusLine = formatStatusLine(theme, status, state, extras, expanded);
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines)]);
 
       const body = capLines(lines.map((l) => theme.fg("toolOutput", l)), theme);
-      return new IndicatorBlock("read", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("read", tag), theme, status, body, statusLine);
     },
   });
+}
 
-  // --- edit ----------------------------------------------------------------
-  const editTool = createEditTool(cwd);
-  pi.registerTool({
-    name: "edit",
+export function createStylishEditTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<EditOperations> = {}) {
+  const localTool = createEditTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().edit);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "edit",
     label: "edit",
-    description: editTool.description,
-    parameters: editTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return editTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      const tool = ops ? createEditTool(cwd, { operations: ops }) : localTool;
+      return tool.execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
       const editCount = Array.isArray(args.edits) ? args.edits.length : 1;
       const suffix = editCount > 1 ? theme.fg("dim", ` (${editCount} edits)`) : "";
+      const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("✎ edit ")) + theme.fg("accent", String(args.path ?? "")) + suffix;
+        theme.fg("toolTitle", theme.bold("✎ edit ")) + theme.fg("accent", String(args.path ?? "")) + suffix + tag;
       return new PlainLines([line]);
     },
 
@@ -396,14 +506,16 @@ export default function (pi: ExtensionAPI) {
       const status = state.status;
       const details = result.details as EditToolDetails | undefined;
       const content = result.content[0];
+      const tag = getTag();
 
       // Matches pi's own edit tool: the diff always renders in full,
       // regardless of collapse/expand state (Ctrl+O has no effect here).
       if (context.isError) {
         const errText = content?.type === "text" ? content.text.split("\n")[0] : "error";
-        const statusLine = formatStatusLine(theme, status, state, [errText], true);
+        const extras = tag ? ["remote", errText] : [errText];
+        const statusLine = formatStatusLine(theme, status, state, extras, true);
         return new IndicatorBlock(
-          "edit",
+          tagLabel("edit", tag),
           theme,
           status,
           [theme.fg("error", content?.type === "text" ? content.text : errText)],
@@ -420,35 +532,44 @@ export default function (pi: ExtensionAPI) {
       }
       const diffStat = theme.fg("success", `+${additions}`) + theme.fg("dim", "/") + theme.fg("error", `-${removals}`);
 
-      const statusLine = formatStatusLine(theme, status, state, [diffStat], true);
+      const extras = tag ? ["remote", diffStat] : [diffStat];
+      const statusLine = formatStatusLine(theme, status, state, extras, true);
       const body = capLines(
         diffLines.map((line) => colorDiffLine(theme, line)),
         theme,
       );
-      return new IndicatorBlock("edit", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("edit", tag), theme, status, body, statusLine);
     },
   });
+}
 
-  // --- write -----------------------------------------------------------
-  const writeTool = createWriteTool(cwd);
-  pi.registerTool({
-    name: "write",
+export function createStylishWriteTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<WriteOperations> = {}) {
+  const localTool = createWriteTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().write);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "write",
     label: "write",
-    description: writeTool.description,
-    parameters: writeTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return writeTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      const tool = ops ? createWriteTool(cwd, { operations: ops }) : localTool;
+      return tool.execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
       const lineCount = String(args.content ?? "").split("\n").length;
+      const tag = renderTag(theme, getTag());
       const line =
         theme.fg("toolTitle", theme.bold("✎ write ")) +
         theme.fg("accent", String(args.path ?? "")) +
-        theme.fg("dim", ` (${lineCount} lines)`);
+        theme.fg("dim", ` (${lineCount} lines)`) +
+        tag;
       return new PlainLines([line]);
     },
 
@@ -458,23 +579,40 @@ export default function (pi: ExtensionAPI) {
       const state = updateRenderState(context, options.isPartial, context.isError, timers);
       const status = state.status;
       const content = result.content[0];
+      const tag = getTag();
 
       if (context.isError) {
         const errText = content?.type === "text" ? content.text.split("\n")[0] : "error";
-        const statusLine = formatStatusLine(theme, status, state, [errText], expanded);
+        const extras = tag ? ["remote", errText] : [errText];
+        const statusLine = formatStatusLine(theme, status, state, extras, expanded);
         return new PlainLines([statusLine]);
       }
 
       const writtenContent = String((context.args as { content?: string } | undefined)?.content ?? "");
       const lines = writtenContent ? writtenContent.split("\n") : [];
-      const statusLine = formatStatusLine(theme, status, state, [`${lines.length} lines`], expanded);
+      const extras = tag ? ["remote", `${lines.length} lines`] : [`${lines.length} lines`];
+      const statusLine = formatStatusLine(theme, status, state, extras, expanded);
 
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines, WRITE_PREVIEW_LINES)]);
 
       const body = capLines(lines.map((l) => theme.fg("toolOutput", l)), theme);
-      return new IndicatorBlock("write", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("write", tag), theme, status, body, statusLine);
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Extension
+// ---------------------------------------------------------------------------
+
+export default function (pi: ExtensionAPI) {
+  const cwd = process.cwd();
+  const timers = new Set<NodeJS.Timeout>();
+
+  pi.registerTool(createStylishBashTool(cwd, timers));
+  pi.registerTool(createStylishReadTool(cwd, timers));
+  pi.registerTool(createStylishEditTool(cwd, timers));
+  pi.registerTool(createStylishWriteTool(cwd, timers));
 
   // --- grep --------------------------------------------------------------
   const grepTool = createGrepTool(cwd);
@@ -615,5 +753,6 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     for (const timer of timers) clearInterval(timer);
     timers.clear();
+    clearOperationsOverride();
   });
 }
