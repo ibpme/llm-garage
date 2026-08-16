@@ -4,25 +4,27 @@
  * One owner for pi's active tool set, combining what used to be two extensions
  * fighting over `setActiveTools`:
  *
- *   /tools          pick which tools are available     (picker.ts)
- *   /safe /yolo     YOLO/SAFE mode + shift+tab         (mode.ts)
- *   change_mode     model-initiated escalation request (change-mode-tool.ts)
+ *   /tools          view which tools are active, read-only (viewer.ts)
+ *   /safe /yolo     YOLO/SAFE mode + shift+tab             (mode.ts)
+ *   change_mode     model-initiated escalation request     (change-mode-tool.ts)
  *
  * SAFE mode *removes* write/edit/bash from the active set and adds the
- * read-only search tools. Mode is in-memory only and starts as YOLO on every
- * session; the tool selection persists per session branch.
- *
- * See state.ts for why selection and mode are modelled separately.
+ * read-only search tools. Mode is in-memory only and the selection is
+ * re-adopted from whatever pi has active fresh every session — there is no
+ * user-editable selection UI to persist a choice from, see viewer.ts and
+ * state.ts for why.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { registerToolGuard } from "../shared/tool-guard.ts";
 import { registerChangeModeTool } from "./change-mode-tool.ts";
 import { registerMode } from "./mode.ts";
-import { persistSelection, restoreSelection } from "./persistence.ts";
-import { registerPicker } from "./picker.ts";
 import { registerSafeContext } from "./safe-context.ts";
 import { BLOCKED_TOOLS, CHANGE_MODE_TOOL, createToolSet, type ToolSet } from "./state.ts";
+import { registerViewer } from "./viewer.ts";
 
 /**
  * The running ToolSet instance, for other extensions (e.g. ssh.ts) that need
@@ -52,15 +54,19 @@ export default function toolSetExtension(pi: ExtensionAPI) {
 	const applyStatus = registerMode(pi, toolSet);
 	registerChangeModeTool(pi, toolSet);
 	registerSafeContext(pi, toolSet);
-	registerPicker(pi, toolSet, () => persistSelection(pi, toolSet));
+	registerViewer(pi, toolSet);
 
 	// Removing tools keeps them out of the model's available tool set. This
 	// guard remains the enforcement layer if another extension re-adds one.
+	// `tools: []` (every tool) rather than a `[...BLOCKED_TOOLS]` snapshot:
+	// other extensions can extend BLOCKED_TOOLS after this factory has already
+	// run (e.g. from their own session_start, via toolSet.addBlockedTools()),
+	// so the check has to read the Set live rather than a copy taken now.
 	registerToolGuard(pi, [
 		{
-			tools: [...BLOCKED_TOOLS],
+			tools: [],
 			check: (event) =>
-				toolSet.getMode() === "safe"
+				toolSet.getMode() === "safe" && BLOCKED_TOOLS.has(event.toolName)
 					? {
 							action: "block",
 							reason: `Blocked by safe mode: ${event.toolName} is disabled. Use /yolo or /auto to restore access.`,
@@ -79,12 +85,9 @@ export default function toolSetExtension(pi: ExtensionAPI) {
 		},
 	]);
 
-	const startSession = async (
-		_event: unknown,
-		ctx: Parameters<typeof applyStatus>[0],
-	) => {
+	const startSession = async (_event: unknown, ctx: ExtensionContext) => {
 		toolSet.beginSession();
-		restoreSelection(pi, toolSet, ctx);
+		toolSet.adoptHostSelection();
 		applyStatus(ctx);
 	};
 

@@ -53,8 +53,11 @@ import {
   type EditOperations,
   type EditToolDetails,
   type ExtensionAPI,
+  type FindOperations,
   type FindToolDetails,
+  type GrepOperations,
   type GrepToolDetails,
+  type LsOperations,
   type LsToolDetails,
   type ReadOperations,
   type ReadToolDetails,
@@ -295,6 +298,9 @@ export interface OperationsOverride {
   write?: WriteOperations;
   edit?: EditOperations;
   bash?: BashOperations;
+  grep?: GrepOperations;
+  ls?: LsOperations;
+  find?: FindOperations;
   /** Short label shown next to the tool header/status line while active, e.g. "ssh:user@host". */
   tag?: string;
 }
@@ -346,6 +352,14 @@ export interface StylishToolOptions<Ops> {
   getOperations?: () => Ops | undefined;
   /** Dynamic short tag shown next to the label/status when operations are overridden. */
   getTag?: () => string | undefined;
+  /**
+   * If set, execute() throws this instead of silently falling back to the
+   * local tool when getOperations() returns undefined. For a tool whose
+   * whole point is to run elsewhere (e.g. a "*_remote" name), running
+   * against local files under that name with no indication would be a
+   * worse failure mode than a clear error.
+   */
+  requireOperationsError?: string;
 }
 
 export function createStylishBashTool(
@@ -369,8 +383,11 @@ export function createStylishBashTool(
 
     async execute(toolCallId, params, signal, onUpdate) {
       const ops = getOps();
-      const tool = ops ? createBashTool(cwd, { operations: ops }) : localTool;
-      return tool.execute(toolCallId, params, signal, onUpdate);
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createBashTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -425,8 +442,11 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
 
     async execute(toolCallId, params, signal, onUpdate) {
       const ops = getOps();
-      const tool = ops ? createReadTool(cwd, { operations: ops }) : localTool;
-      return tool.execute(toolCallId, params, signal, onUpdate);
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createReadTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -487,8 +507,11 @@ export function createStylishEditTool(cwd: string, timers: Set<NodeJS.Timeout>, 
 
     async execute(toolCallId, params, signal, onUpdate) {
       const ops = getOps();
-      const tool = ops ? createEditTool(cwd, { operations: ops }) : localTool;
-      return tool.execute(toolCallId, params, signal, onUpdate);
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createEditTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -557,8 +580,11 @@ export function createStylishWriteTool(cwd: string, timers: Set<NodeJS.Timeout>,
 
     async execute(toolCallId, params, signal, onUpdate) {
       const ops = getOps();
-      const tool = ops ? createWriteTool(cwd, { operations: ops }) : localTool;
-      return tool.execute(toolCallId, params, signal, onUpdate);
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createWriteTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
@@ -601,37 +627,33 @@ export function createStylishWriteTool(cwd: string, timers: Set<NodeJS.Timeout>,
   });
 }
 
-// ---------------------------------------------------------------------------
-// Extension
-// ---------------------------------------------------------------------------
+export function createStylishGrepTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<GrepOperations> = {}) {
+  const localTool = createGrepTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().grep);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
 
-export default function (pi: ExtensionAPI) {
-  const cwd = process.cwd();
-  const timers = new Set<NodeJS.Timeout>();
-
-  pi.registerTool(createStylishBashTool(cwd, timers));
-  pi.registerTool(createStylishReadTool(cwd, timers));
-  pi.registerTool(createStylishEditTool(cwd, timers));
-  pi.registerTool(createStylishWriteTool(cwd, timers));
-
-  // --- grep --------------------------------------------------------------
-  const grepTool = createGrepTool(cwd);
-  pi.registerTool({
-    name: "grep",
+  return defineTool({
+    name: opts.name ?? "grep",
     label: "grep",
-    description: grepTool.description,
-    parameters: grepTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return grepTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createGrepTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
       const path = args.path ? theme.fg("dim", ` in ${args.path}`) : "";
+      const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("⌕ grep ")) + theme.fg("accent", String(args.pattern ?? "")) + path;
+        theme.fg("toolTitle", theme.bold("⌕ grep ")) + theme.fg("accent", String(args.pattern ?? "")) + path + tag;
       return new PlainLines([line]);
     },
 
@@ -645,9 +667,11 @@ export default function (pi: ExtensionAPI) {
       const noMatches = text.trim() === "No matches found";
       const lines = noMatches ? [] : text.split("\n");
       const matchCount = noMatches ? 0 : countNonEmptyLines(text);
+      const tag = getTag();
 
       const extras = [`${matchCount} match${matchCount === 1 ? "" : "es"}`];
       if (details?.matchLimitReached) extras.push("limit reached");
+      if (tag) extras.unshift("remote");
 
       const statusLine = formatStatusLine(theme, status, state, extras, expanded);
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines, GREP_PREVIEW_LINES)]);
@@ -656,26 +680,36 @@ export default function (pi: ExtensionAPI) {
         noMatches ? [theme.fg("dim", "(no matches)")] : lines.map((l) => theme.fg("toolOutput", l)),
         theme,
       );
-      return new IndicatorBlock("grep", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("grep", tag), theme, status, body, statusLine);
     },
   });
+}
 
-  // --- ls ------------------------------------------------------------------
-  const lsTool = createLsTool(cwd);
-  pi.registerTool({
-    name: "ls",
+export function createStylishLsTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<LsOperations> = {}) {
+  const localTool = createLsTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().ls);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "ls",
     label: "ls",
-    description: lsTool.description,
-    parameters: lsTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return lsTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createLsTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
-      const line = theme.fg("toolTitle", theme.bold("▸ ls ")) + theme.fg("accent", String(args.path ?? "."));
+      const tag = renderTag(theme, getTag());
+      const line = theme.fg("toolTitle", theme.bold("▸ ls ")) + theme.fg("accent", String(args.path ?? ".")) + tag;
       return new PlainLines([line]);
     },
 
@@ -689,9 +723,11 @@ export default function (pi: ExtensionAPI) {
       const empty = text.trim() === "(empty directory)";
       const lines = empty ? [] : text.split("\n");
       const entryCount = empty ? 0 : countNonEmptyLines(text);
+      const tag = getTag();
 
       const extras = [`${entryCount} entr${entryCount === 1 ? "y" : "ies"}`];
       if (details?.entryLimitReached) extras.push("limit reached");
+      if (tag) extras.unshift("remote");
 
       const statusLine = formatStatusLine(theme, status, state, extras, expanded);
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines, LS_PREVIEW_LINES)]);
@@ -700,28 +736,38 @@ export default function (pi: ExtensionAPI) {
         empty ? [theme.fg("dim", "(empty directory)")] : lines.map((l) => theme.fg("toolOutput", l)),
         theme,
       );
-      return new IndicatorBlock("ls", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("ls", tag), theme, status, body, statusLine);
     },
   });
+}
 
-  // --- find ----------------------------------------------------------------
-  const findTool = createFindTool(cwd);
-  pi.registerTool({
-    name: "find",
+export function createStylishFindTool(cwd: string, timers: Set<NodeJS.Timeout>, opts: StylishToolOptions<FindOperations> = {}) {
+  const localTool = createFindTool(cwd);
+  const getOps = opts.getOperations ?? (() => readOperationsOverride().find);
+  const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+
+  return defineTool({
+    name: opts.name ?? "find",
     label: "find",
-    description: findTool.description,
-    parameters: findTool.parameters,
+    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    parameters: localTool.parameters,
     renderShell: "self",
 
     async execute(toolCallId, params, signal, onUpdate) {
-      return findTool.execute(toolCallId, params, signal, onUpdate);
+      const ops = getOps();
+      if (!ops) {
+        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+        return localTool.execute(toolCallId, params, signal, onUpdate);
+      }
+      return createFindTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
     },
 
     renderCall(args, theme, context) {
       ensureState(context);
       const path = args.path ? theme.fg("dim", ` in ${args.path}`) : "";
+      const tag = renderTag(theme, getTag());
       const line =
-        theme.fg("toolTitle", theme.bold("⌕ find ")) + theme.fg("accent", String(args.pattern ?? "")) + path;
+        theme.fg("toolTitle", theme.bold("⌕ find ")) + theme.fg("accent", String(args.pattern ?? "")) + path + tag;
       return new PlainLines([line]);
     },
 
@@ -735,9 +781,11 @@ export default function (pi: ExtensionAPI) {
       const noResults = text.trim() === "No files found matching pattern";
       const lines = noResults ? [] : text.split("\n");
       const resultCount = noResults ? 0 : countNonEmptyLines(text);
+      const tag = getTag();
 
       const extras = [`${resultCount} result${resultCount === 1 ? "" : "s"}`];
       if (details?.resultLimitReached) extras.push("limit reached");
+      if (tag) extras.unshift("remote");
 
       const statusLine = formatStatusLine(theme, status, state, extras, expanded);
       if (!expanded) return new PlainLines([statusLine, ...buildPreview(theme, lines, FIND_PREVIEW_LINES)]);
@@ -746,9 +794,26 @@ export default function (pi: ExtensionAPI) {
         noResults ? [theme.fg("dim", "(no results)")] : lines.map((l) => theme.fg("toolOutput", l)),
         theme,
       );
-      return new IndicatorBlock("find", theme, status, body, statusLine);
+      return new IndicatorBlock(tagLabel("find", tag), theme, status, body, statusLine);
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Extension
+// ---------------------------------------------------------------------------
+
+export default function (pi: ExtensionAPI) {
+  const cwd = process.cwd();
+  const timers = new Set<NodeJS.Timeout>();
+
+  pi.registerTool(createStylishBashTool(cwd, timers));
+  pi.registerTool(createStylishReadTool(cwd, timers));
+  pi.registerTool(createStylishEditTool(cwd, timers));
+  pi.registerTool(createStylishWriteTool(cwd, timers));
+  pi.registerTool(createStylishGrepTool(cwd, timers));
+  pi.registerTool(createStylishLsTool(cwd, timers));
+  pi.registerTool(createStylishFindTool(cwd, timers));
 
   pi.on("session_shutdown", async () => {
     for (const timer of timers) clearInterval(timer);

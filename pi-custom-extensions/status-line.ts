@@ -17,7 +17,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 const BAR_WIDTH = 10;
 
 /** Extension statuses hoisted onto line 2 instead of the trailing status line. */
-const INLINE_STATUS_KEYS = ["mode", "tool-calls"] as const;
+const INLINE_STATUS_KEYS = ["mode", "ssh", "tool-calls"] as const;
 
 function sanitizeStatus(text: string): string {
   return text

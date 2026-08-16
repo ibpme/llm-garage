@@ -66,9 +66,7 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 
 		const available = new Set(pi.getAllTools().map((tool) => tool.name));
 		const kept = selection.filter((name) => !BLOCKED_TOOLS.has(name));
-		const extras = [...SAFE_EXTRA_TOOLS, CHANGE_MODE_TOOL].filter((name) =>
-			available.has(name),
-		);
+		const extras = [...SAFE_ONLY_TOOLS].filter((name) => available.has(name));
 		return [...new Set([...kept, ...extras])];
 	}
 
@@ -77,17 +75,18 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 		for (const listener of listeners) listener();
 	}
 
+	function switchMode(next: Mode) {
+		mode = next;
+		apply();
+	}
+
 	return {
 		getMode: () => mode,
 
-		setMode(next) {
-			mode = next;
-			apply();
-		},
+		setMode: switchMode,
 
 		toggleMode() {
-			mode = mode === "safe" ? "yolo" : "safe";
-			apply();
+			switchMode(mode === "safe" ? "yolo" : "safe");
 		},
 
 		beginSession() {
@@ -113,6 +112,13 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 		},
 
 		addBlockedTools(names) {
+			// Deliberately does NOT call apply(): callers (e.g. ssh.ts) do this
+			// from their own session_start, which may run before this extension's
+			// own session_start has restored the selection. Applying an empty
+			// `selection` there makes adoptHostSelection()'s "seed from what pi
+			// has active" fallback adopt that empty result, silently zeroing the
+			// tool set for the session. mask() reads BLOCKED_TOOLS live, so the
+			// next real apply() picks these up anyway.
 			for (const name of names) BLOCKED_TOOLS.add(name);
 		},
 

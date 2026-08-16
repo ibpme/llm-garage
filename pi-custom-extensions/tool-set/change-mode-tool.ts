@@ -12,7 +12,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CHANGE_MODE_TOOL, type ToolSet } from "./state.ts";
 
-export const SAFE_MODE_GUIDELINES = [
+const SAFE_MODE_GUIDELINES = [
 	"SAFE mode is active: write, edit, and bash are unavailable. Do not attempt to call them.",
 	'Use change_mode with mode "yolo" when write, edit, or bash access is required.',
 ];
