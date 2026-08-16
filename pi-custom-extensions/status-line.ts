@@ -16,8 +16,8 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 const BAR_WIDTH = 10;
 
-/** Extension status hoisted onto line 2 instead of the trailing status line. */
-const INLINE_STATUS_KEY = "mode";
+/** Extension statuses hoisted onto line 2 instead of the trailing status line. */
+const INLINE_STATUS_KEYS = ["mode", "tool-calls"] as const;
 
 function sanitizeStatus(text: string): string {
   return text
@@ -149,11 +149,13 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const extensionStatuses = footerData.getExtensionStatuses();
 
-          // Prepended rather than appended so the width truncation below eats
-          // the stats before it eats the mode badge.
-          const inlineStatus = extensionStatuses.get(INLINE_STATUS_KEY);
-          if (inlineStatus) {
-            statParts.unshift(sanitizeStatus(inlineStatus));
+          // Prepended (in reverse) rather than appended so the width
+          // truncation below eats the stats before it eats these badges.
+          for (let index = INLINE_STATUS_KEYS.length - 1; index >= 0; index--) {
+            const inlineStatus = extensionStatuses.get(INLINE_STATUS_KEYS[index]);
+            if (inlineStatus) {
+              statParts.unshift(sanitizeStatus(inlineStatus));
+            }
           }
 
           let statsLeft = statParts.join(theme.fg("dim", " · "));
@@ -180,7 +182,7 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           const lines = [line1, line2];
 
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => key !== INLINE_STATUS_KEY)
+            .filter(([key]) => !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
           if (rest.length > 0) {
