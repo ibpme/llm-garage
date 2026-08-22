@@ -166,7 +166,6 @@ function formatStatus(ctx: ExtensionContext, stats: Stats): string {
 	const breakdown = formatBreakdown(currentTurn?.tools ?? new Map(), theme);
 
 	return (
-		theme.fg("dim", "tool-call(s): ") +
 		breakdown +
 		theme.fg("dim", " (") +
 		theme.fg("warning", `${total}`) +

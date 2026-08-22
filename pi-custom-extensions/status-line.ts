@@ -17,7 +17,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 const BAR_WIDTH = 10;
 
 /** Extension statuses hoisted onto line 2 instead of the trailing status line. */
-const INLINE_STATUS_KEYS = ["mode", "ssh", "tool-calls"] as const;
+const INLINE_STATUS_KEYS = ["mode", "ssh"] as const;
 
 function sanitizeStatus(text: string): string {
   return text
@@ -67,13 +67,18 @@ function thinkingColor(level: string) {
 
 export default function statusLineExtension(pi: ExtensionAPI) {
   let enabled = true;
+  let activeTui: { requestRender(): void } | undefined;
 
   function install(ctx: ExtensionContext) {
     ctx.ui.setFooter((tui, theme, footerData) => {
+      activeTui = tui;
       const unsub = footerData.onBranchChange(() => tui.requestRender());
 
       return {
-        dispose: unsub,
+        dispose() {
+          unsub();
+          if (activeTui === tui) activeTui = undefined;
+        },
         invalidate() {},
         render(width: number): string[] {
           let input = 0,
@@ -168,15 +173,26 @@ export default function statusLineExtension(pi: ExtensionAPI) {
               theme.fg("dim", " • ") + theme.fg(thinkingColor(level), level);
           }
 
-          const statsLeftWidth = visibleWidth(statsLeft);
           const rightSideWidth = visibleWidth(rightSide);
           const minPadding = 2;
           let line2: string;
-          if (statsLeftWidth + minPadding + rightSideWidth <= width) {
-            const padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
-            line2 = statsLeft + padding + rightSide;
+          if (rightSideWidth >= width) {
+            // Keep the model visible even on very narrow terminals. The model
+            // label is the only part allowed to lose content in this case.
+            line2 = truncateToWidth(rightSide, width, theme.fg("dim", "..."));
           } else {
-            line2 = truncateToWidth(statsLeft, width, theme.fg("dim", "..."));
+            // The model/thinking indicator is the primary status. Truncate the
+            // stats to the space left by it rather than dropping it entirely.
+            const statsWidth = width - minPadding - rightSideWidth;
+            const visibleStats = truncateToWidth(
+              statsLeft,
+              statsWidth,
+              theme.fg("dim", "..."),
+            );
+            const padding = " ".repeat(
+              Math.max(0, width - visibleWidth(visibleStats) - rightSideWidth),
+            );
+            line2 = visibleStats + padding + rightSide;
           }
 
           const lines = [line1, line2];
@@ -204,6 +220,10 @@ export default function statusLineExtension(pi: ExtensionAPI) {
   function uninstall(ctx: ExtensionContext) {
     ctx.ui.setFooter(undefined);
   }
+
+  pi.on("model_select", async () => {
+    activeTui?.requestRender();
+  });
 
   pi.registerCommand("statusline", {
     description: "Toggle the colorful status line",
