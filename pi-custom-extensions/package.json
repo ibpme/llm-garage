@@ -11,6 +11,7 @@
     "@earendil-works/pi-coding-agent": "latest",
     "@earendil-works/pi-tui": "latest",
     "@types/node": "24.12.4",
+    "grok-mermaid": "0.2.2",
     "typebox": "latest",
     "typescript": "5.9.3"
   }

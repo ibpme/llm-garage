@@ -105,14 +105,19 @@ export function textSource(content: string): PagerSource {
  * requires an initialized TUI theme, and a source may legitimately be created
  * in a non-TUI session where openPager only ever prints the plain text.
  */
-export function markdownSource(content: string): PagerSource {
+export function markdownSource(
+	content: string,
+	transform?: (markdown: string, availableWidth: number) => string,
+): PagerSource {
 	let markdown: Markdown | undefined;
 	let cachedWidth = -1;
 	let cachedLines: string[] = [];
 
 	return {
 		lines(width) {
-			markdown ??= new Markdown(content, 0, 0, getMarkdownTheme());
+			markdown ??= new Markdown(content, 0, 0, getMarkdownTheme(), undefined, {
+				transform: transform ? (markdown, availableWidth) => transform(markdown, availableWidth) : undefined,
+			});
 			if (cachedWidth !== width) {
 				cachedLines = markdown.render(width);
 				cachedWidth = width;

@@ -12,6 +12,7 @@ import type {
 	ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { extractTextParts } from "./shared/message-text.ts";
+import { renderMermaidMarkdown } from "./shared/mermaid.ts";
 import { markdownSource, openPager } from "./shared/pager.ts";
 
 function findLastAssistantText(ctx: ExtensionCommandContext): string | undefined {
@@ -40,7 +41,9 @@ export default function readmdExtension(pi: ExtensionAPI) {
 
 			await openPager(ctx, {
 				title: "Last Assistant Response",
-				source: markdownSource(text),
+				source: markdownSource(text, (markdown, availableWidth) =>
+					renderMermaidMarkdown(markdown, availableWidth, ctx.ui.theme),
+				),
 				plainText: text,
 			});
 		},
