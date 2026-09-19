@@ -269,9 +269,13 @@ export default function questionnaire(pi: ExtensionAPI) {
             validationMessage = undefined;
 
             const otherIdx = q.options.length;
-            const sel = selections.get(inputQuestionId) || new Set<number>();
-            sel.add(otherIdx);
-            selections.set(inputQuestionId, sel);
+            if (q.multiSelect) {
+              const sel = selections.get(inputQuestionId) || new Set<number>();
+              sel.add(otherIdx);
+              selections.set(inputQuestionId, sel);
+            } else {
+              selections.set(inputQuestionId, new Set([otherIdx]));
+            }
 
             inputMode = false;
             inputQuestionId = null;
@@ -517,13 +521,16 @@ export default function questionnaire(pi: ExtensionAPI) {
                 const isDone = opt.isDone === true;
 
                 const cursorPrefix = selected ? theme.fg("accent", "> ") : "  ";
-                const checkPrefix =
-                  q?.multiSelect && !isDone
+                const selectionPrefix = !isDone
+                  ? q?.multiSelect
                     ? opt.isSelected
                       ? "[x] "
                       : "[ ] "
-                    : "";
-                const prefix = cursorPrefix + checkPrefix;
+                    : opt.isSelected
+                      ? theme.fg("success", "✓ ")
+                      : "  "
+                  : "";
+                const prefix = cursorPrefix + selectionPrefix;
 
                 const numPrefix = isDone ? "" : `${i + 1}. `;
                 const label = `${numPrefix}${opt.label}${isOther && inputMode ? " ✎" : ""}`;
@@ -531,7 +538,7 @@ export default function questionnaire(pi: ExtensionAPI) {
                   selected || (isOther && inputMode) ? "accent" : "text";
 
                 addWrappedWithPrefix(prefix, theme.fg(color, label));
-                if (opt.description && !opt.isSelected) {
+                if (opt.description) {
                   addWrappedWithPrefix(
                     "     ",
                     theme.fg("muted", opt.description),
