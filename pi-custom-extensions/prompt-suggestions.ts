@@ -5,7 +5,6 @@ import {
   CustomEditor,
   type ExtensionAPI,
   type ExtensionContext,
-  type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
   CURSOR_MARKER,
@@ -13,9 +12,7 @@ import {
   truncateToWidth,
   type AutocompleteProvider,
   type EditorComponent,
-  type EditorTheme,
   type Focusable,
-  type TUI,
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { extractTextParts } from "./shared/message-text.ts";
@@ -23,13 +20,21 @@ import { extractTextParts } from "./shared/message-text.ts";
 const CONFIG_DIR = join(homedir(), ".pi", "agent");
 const CONFIG_PATH = join(CONFIG_DIR, "prompt-suggestions.json");
 const STATUS_ID = "prompt-suggestions";
-const DEFAULT_MODEL = "gemma4:e2b";
-const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+
+const DEFAULT_CONFIG: SuggestionConfig = {
+  enabled: true,
+  provider: "opencode-go",
+  model: "muse-spark-1.3-contributor",
+  ollamaUrl: "http://127.0.0.1:11434",
+};
+
 const REQUEST_TIMEOUT_MS = 10_000;
+const UNAVAILABLE_DISPLAY_MS = 3_000;
 const MAX_CONTEXT_CHARS = 16_000;
 const MAX_SUGGESTION_CHARS = 240;
+const MAX_RESPONSE_TOKENS = 256;
 const NO_SUGGESTION = "NO_SUGGESTION";
-const CURSOR_SPACE = "\x1b[7m \x1b[0m";
+const SOFTWARE_CURSOR = "\x1b[7m \x1b[0m";
 
 const SUGGESTION_SYSTEM_PROMPT = `You suggest one useful next-step follow-up prompt for an ongoing conversation.
 
@@ -41,114 +46,78 @@ Rules:
 - Do not use Markdown, quotes, labels, or explanations.
 - If there is no meaningful follow-up, return exactly ${NO_SUGGESTION}.`;
 
+type Phase = "idle" | "thinking" | "unavailable";
+
 interface SuggestionConfig {
   enabled: boolean;
+  provider: string;
   model: string;
   ollamaUrl: string;
 }
 
-const DEFAULT_CONFIG: SuggestionConfig = {
-  enabled: true,
-  model: DEFAULT_MODEL,
-  ollamaUrl: DEFAULT_OLLAMA_URL,
-};
+interface SuggestionViewState {
+  enabled: boolean;
+  phase: Phase;
+  suggestion: string | null;
+}
 
 interface OllamaResponse {
-  message?: {
-    content?: unknown;
-  };
+  message?: { content?: unknown };
 }
 
-class SuggestionState {
-  enabled = true;
-  suggestion: string | null = null;
-  phase: "idle" | "thinking" | "unavailable" = "idle";
-  private readonly listeners = new Set<() => void>();
-
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  setEnabled(enabled: boolean): void {
-    this.enabled = enabled;
-    if (!enabled) this.suggestion = null;
-    this.notify();
-  }
-
-  setSuggestion(suggestion: string | null): void {
-    this.suggestion = suggestion;
-    this.notify();
-  }
-
-  setPhase(phase: SuggestionState["phase"]): void {
-    this.phase = phase;
-    this.notify();
-  }
-
-  private notify(): void {
-    for (const listener of this.listeners) listener();
-  }
-}
-
+/** Adds ghost text without replacing whichever custom editor is already active. */
 class SuggestionEditor implements EditorComponent, Focusable {
   private submitHandler: ((text: string) => void) | undefined;
   private changeHandler: ((text: string) => void) | undefined;
 
   constructor(
     private readonly base: EditorComponent,
-    tui: TUI,
-    private readonly suggestionState: SuggestionState,
-    private readonly onUserInput: () => void,
-  ) {
-    suggestionState.subscribe(() => tui.requestRender());
-  }
+    private readonly state: SuggestionViewState,
+    private readonly dismiss: () => void,
+  ) {}
 
   get focused(): boolean {
-    return "focused" in this.base
-      ? (this.base as EditorComponent & Focusable).focused
-      : false;
+    return isFocusable(this.base) ? this.base.focused : false;
   }
 
   set focused(value: boolean) {
-    if ("focused" in this.base) {
-      (this.base as EditorComponent & Focusable).focused = value;
-    }
+    if (isFocusable(this.base)) this.base.focused = value;
   }
 
-  get actionHandlers(): Map<string, () => void> {
+  // Pi configures these CustomEditor hooks after constructing the component.
+  get actionHandlers(): CustomEditor["actionHandlers"] {
     return (this.base as CustomEditor).actionHandlers;
   }
 
-  get onEscape(): (() => void) | undefined {
+  get onEscape(): CustomEditor["onEscape"] {
     return (this.base as CustomEditor).onEscape;
   }
 
-  set onEscape(handler: (() => void) | undefined) {
+  set onEscape(handler: CustomEditor["onEscape"]) {
     (this.base as CustomEditor).onEscape = handler;
   }
 
-  get onCtrlD(): (() => void) | undefined {
+  get onCtrlD(): CustomEditor["onCtrlD"] {
     return (this.base as CustomEditor).onCtrlD;
   }
 
-  set onCtrlD(handler: (() => void) | undefined) {
+  set onCtrlD(handler: CustomEditor["onCtrlD"]) {
     (this.base as CustomEditor).onCtrlD = handler;
   }
 
-  get onPasteImage(): (() => void) | undefined {
+  get onPasteImage(): CustomEditor["onPasteImage"] {
     return (this.base as CustomEditor).onPasteImage;
   }
 
-  set onPasteImage(handler: (() => void) | undefined) {
+  set onPasteImage(handler: CustomEditor["onPasteImage"]) {
     (this.base as CustomEditor).onPasteImage = handler;
   }
 
-  get onExtensionShortcut(): ((data: string) => boolean) | undefined {
+  get onExtensionShortcut(): CustomEditor["onExtensionShortcut"] {
     return (this.base as CustomEditor).onExtensionShortcut;
   }
 
-  set onExtensionShortcut(handler: ((data: string) => boolean) | undefined) {
+  set onExtensionShortcut(handler: CustomEditor["onExtensionShortcut"]) {
     (this.base as CustomEditor).onExtensionShortcut = handler;
   }
 
@@ -171,35 +140,28 @@ class SuggestionEditor implements EditorComponent, Focusable {
   }
 
   handleInput(data: string): void {
-    if (this.suggestionState.suggestion && matchesKey(data, "tab")) {
-      const suggestion = this.suggestionState.suggestion;
-      this.suggestionState.setSuggestion(null);
-      this.onUserInput();
+    const suggestion = this.state.suggestion;
+    if (suggestion && matchesKey(data, "tab")) {
+      this.dismiss();
       this.base.setText(suggestion);
       return;
     }
-
-    if (this.suggestionState.suggestion && matchesKey(data, "escape")) {
-      this.suggestionState.setSuggestion(null);
-      this.onUserInput();
+    if (suggestion && matchesKey(data, "escape")) {
+      this.dismiss();
       return;
     }
 
-    this.onUserInput();
+    this.dismiss();
     this.base.handleInput(data);
   }
 
   setText(text: string): void {
-    if (text.length > 0) {
-      this.suggestionState.setSuggestion(null);
-      this.onUserInput();
-    }
+    if (text) this.dismiss();
     this.base.setText(text);
   }
 
   insertTextAtCursor(text: string): void {
-    this.suggestionState.setSuggestion(null);
-    this.onUserInput();
+    this.dismiss();
     this.base.insertTextAtCursor?.(text);
   }
 
@@ -231,8 +193,8 @@ class SuggestionEditor implements EditorComponent, Focusable {
     return this.base.borderColor;
   }
 
-  set borderColor(colorizer: ((text: string) => string) | undefined) {
-    this.base.borderColor = colorizer;
+  set borderColor(color: ((text: string) => string) | undefined) {
+    this.base.borderColor = color;
   }
 
   invalidate(): void {
@@ -241,98 +203,98 @@ class SuggestionEditor implements EditorComponent, Focusable {
 
   render(width: number): string[] {
     const lines = this.base.render(width);
-    const suggestion = this.suggestionState.suggestion;
-    if (!suggestion || this.getText().length > 0) return lines;
+    const suggestion = this.state.suggestion;
+    if (!suggestion || this.base.getText()) return lines;
 
     const lineIndex = lines.findIndex(
-      (line) => line.includes(CURSOR_MARKER) || line.includes(CURSOR_SPACE),
+      (line) => line.includes(CURSOR_MARKER) || line.includes(SOFTWARE_CURSOR),
     );
     if (lineIndex < 0) return lines;
 
     const line = lines[lineIndex]!;
-    const hardwareCursorIndex = line.indexOf(CURSOR_MARKER);
-    const softwareCursorIndex = line.indexOf(CURSOR_SPACE);
-    const useHardwareCursor = hardwareCursorIndex >= 0;
-    const cursorIndex = useHardwareCursor
-      ? hardwareCursorIndex
-      : softwareCursorIndex;
-    const cursorToken = useHardwareCursor ? CURSOR_MARKER : CURSOR_SPACE;
+    const hardwareCursor = line.indexOf(CURSOR_MARKER);
+    const cursorToken = hardwareCursor >= 0 ? CURSOR_MARKER : SOFTWARE_CURSOR;
+    const cursorIndex =
+      hardwareCursor >= 0 ? hardwareCursor : line.indexOf(SOFTWARE_CURSOR);
     const before = line.slice(0, cursorIndex);
     const after = line.slice(cursorIndex + cursorToken.length);
     const availableWidth = visibleWidth(after);
     const ghost = truncateToWidth(suggestion, availableWidth, "");
-    const ghostWidth = visibleWidth(ghost);
 
     lines[lineIndex] =
       before +
       cursorToken +
       `\x1b[2m${ghost}\x1b[0m` +
-      " ".repeat(Math.max(0, availableWidth - ghostWidth));
+      " ".repeat(Math.max(0, availableWidth - visibleWidth(ghost)));
     return lines;
   }
+}
+
+function isFocusable(
+  component: EditorComponent,
+): component is EditorComponent & Focusable {
+  return "focused" in component;
 }
 
 function normalizeUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function parseConfig(raw: unknown): Partial<SuggestionConfig> {
   if (!raw || typeof raw !== "object") return {};
   const value = raw as Record<string, unknown>;
+  const ollamaUrl = nonEmptyString(value.ollamaUrl);
+
   return {
     enabled: typeof value.enabled === "boolean" ? value.enabled : undefined,
-    model: isNonEmptyString(value.model) ? value.model.trim() : undefined,
-    ollamaUrl: isNonEmptyString(value.ollamaUrl)
-      ? normalizeUrl(value.ollamaUrl.trim())
-      : undefined,
+    provider: nonEmptyString(value.provider),
+    model: nonEmptyString(value.model),
+    ollamaUrl: ollamaUrl ? normalizeUrl(ollamaUrl) : undefined,
   };
 }
 
-async function readLocalConfig(): Promise<Partial<SuggestionConfig>> {
+async function readConfigFile(): Promise<Partial<SuggestionConfig>> {
   try {
-    const text = await readFile(CONFIG_PATH, "utf8");
-    return parseConfig(JSON.parse(text));
+    return parseConfig(JSON.parse(await readFile(CONFIG_PATH, "utf8")));
   } catch {
     return {};
   }
 }
 
 async function loadConfig(): Promise<SuggestionConfig> {
-  const local = await readLocalConfig();
+  const saved = await readConfigFile();
   return {
-    enabled: local.enabled ?? DEFAULT_CONFIG.enabled,
+    enabled: saved.enabled ?? DEFAULT_CONFIG.enabled,
+    provider:
+      nonEmptyString(process.env.PI_SUGGESTIONS_PROVIDER) ??
+      saved.provider ??
+      // Old config files only described an Ollama endpoint.
+      (saved.ollamaUrl ? "ollama" : DEFAULT_CONFIG.provider),
     model:
-      process.env.PI_SUGGESTIONS_MODEL?.trim() ||
-      local.model ||
+      nonEmptyString(process.env.PI_SUGGESTIONS_MODEL) ??
+      saved.model ??
       DEFAULT_CONFIG.model,
     ollamaUrl: normalizeUrl(
-      process.env.PI_SUGGESTIONS_OLLAMA_URL?.trim() ||
-        local.ollamaUrl ||
+      nonEmptyString(process.env.PI_SUGGESTIONS_OLLAMA_URL) ??
+        saved.ollamaUrl ??
         DEFAULT_CONFIG.ollamaUrl,
     ),
   };
 }
 
-async function saveEnabled(enabled: boolean): Promise<void> {
-  const local = await readLocalConfig();
-  const config: SuggestionConfig = {
-    enabled,
-    model: local.model || DEFAULT_CONFIG.model,
-    ollamaUrl: local.ollamaUrl || DEFAULT_CONFIG.ollamaUrl,
-  };
-  await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
+async function saveConfig(config: SuggestionConfig): Promise<void> {
+  await mkdir(CONFIG_DIR, { recursive: true });
   await writeFile(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-function serializeContext(ctx: ExtensionContext): string {
-  const entries = ctx.sessionManager.buildContextEntries();
+function contextSections(ctx: ExtensionContext): string[] {
   const sections: string[] = [];
 
-  for (const entry of entries) {
+  for (const entry of ctx.sessionManager.buildContextEntries()) {
     if (entry.type === "compaction") {
       sections.push(`[COMPACTION SUMMARY]\n${entry.summary}`);
       continue;
@@ -343,7 +305,7 @@ function serializeContext(ctx: ExtensionContext): string {
     }
     if (entry.type !== "message") continue;
 
-    const message = entry.message;
+    const { message } = entry;
     if (
       message.role !== "user" &&
       message.role !== "assistant" &&
@@ -356,27 +318,56 @@ function serializeContext(ctx: ExtensionContext): string {
     if (!text) continue;
 
     const role =
-      message.role === "toolResult" ? "TOOL RESULT" : message.role.toUpperCase();
+      message.role === "toolResult"
+        ? "TOOL RESULT"
+        : message.role.toUpperCase();
     sections.push(`[${role}]\n${text}`);
   }
 
+  return sections;
+}
+
+function serializeContext(ctx: ExtensionContext): string {
+  const sections = contextSections(ctx);
   const full = sections.join("\n\n");
   if (full.length <= MAX_CONTEXT_CHARS) return full;
 
-  const truncationNote = "[Earlier context truncated]\n";
-  return truncationNote + full.slice(-(MAX_CONTEXT_CHARS - truncationNote.length));
+  const note = "[Earlier context truncated]\n\n";
+  const budget = MAX_CONTEXT_CHARS - note.length;
+  const kept: string[] = [];
+  let length = 0;
+
+  for (let index = sections.length - 1; index >= 0; index--) {
+    const section = sections[index]!;
+    const separatorLength = kept.length ? 2 : 0;
+    if (length + separatorLength + section.length <= budget) {
+      kept.unshift(section);
+      length += separatorLength + section.length;
+      continue;
+    }
+
+    if (!kept.length) kept.push(section.slice(-budget));
+    break;
+  }
+
+  return note + kept.join("\n\n");
 }
 
-function validateSuggestion(raw: unknown, previous: string | null): string | null {
+function validateSuggestion(
+  raw: unknown,
+  previous: string | null,
+): string | null {
   if (typeof raw !== "string") return null;
   const suggestion = raw.trim();
+
   if (!suggestion || suggestion.toUpperCase() === NO_SUGGESTION) return null;
-  if (suggestion.length > MAX_SUGGESTION_CHARS) return null;
+  if (suggestion.length > MAX_SUGGESTION_CHARS || suggestion === previous)
+    return null;
   if (/```|^suggestion\s*:/i.test(suggestion)) return null;
   if (/^(?:[-*•]\s+|\d+[.)]\s+)/.test(suggestion)) return null;
   if (/^(?:".*"|'.*'|`.*`)$/.test(suggestion)) return null;
   if (/[\r\n\x00-\x1f\x7f\u001b]/.test(suggestion)) return null;
-  if (suggestion === previous) return null;
+
   return suggestion;
 }
 
@@ -401,9 +392,7 @@ async function requestOllama(
     signal,
   });
 
-  if (!response.ok) {
-    throw new Error(`Ollama returned HTTP ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`Ollama returned HTTP ${response.status}`);
 
   const payload = (await response.json()) as OllamaResponse;
   return typeof payload.message?.content === "string"
@@ -411,7 +400,68 @@ async function requestOllama(
     : null;
 }
 
-function statusText(state: SuggestionState): string {
+async function requestSuggestion(
+  config: SuggestionConfig,
+  context: string,
+  signal: AbortSignal,
+  ctx: ExtensionContext,
+): Promise<string | null> {
+  if (config.provider === "ollama") {
+    return requestOllama(config, context, signal);
+  }
+
+  const model = ctx.modelRegistry.find(config.provider, config.model);
+  if (!model)
+    throw new Error(`Model ${config.provider}/${config.model} was not found`);
+  if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+    throw new Error(
+      `No authentication configured for ${config.provider}/${config.model}`,
+    );
+  }
+
+  const response = await ctx.modelRegistry.complete(
+    model,
+    {
+      systemPrompt: SUGGESTION_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: context }],
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    {
+      temperature: 0.3,
+      maxTokens: MAX_RESPONSE_TOKENS,
+      reasoningEffort: "minimal",
+      cacheRetention: "none",
+      sessionId: ctx.sessionManager.getSessionId(),
+      transformHeaders: (headers) =>
+        model.provider === "opencode" || model.provider === "opencode-go"
+          ? {
+              ...headers,
+              "x-opencode-session": ctx.sessionManager.getSessionId(),
+              "x-opencode-client": "pi",
+            }
+          : headers,
+      signal,
+    },
+  );
+
+  if (response.stopReason === "error") {
+    throw new Error(response.errorMessage ?? "Suggestion request failed");
+  }
+
+  return response.content
+    .filter(
+      (part): part is { type: "text"; text: string } => part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+function statusText(state: SuggestionViewState): string {
   if (!state.enabled) return "suggestions: off";
   if (state.phase === "thinking") return "suggestions: thinking…";
   if (state.phase === "unavailable") return "suggestions: unavailable";
@@ -419,200 +469,212 @@ function statusText(state: SuggestionState): string {
   return "suggestions: on";
 }
 
-export default function promptSuggestionsExtension(pi: ExtensionAPI) {
-  const state = new SuggestionState();
-  let config: SuggestionConfig = { ...DEFAULT_CONFIG };
-  let requestController: AbortController | undefined;
-  let requestGeneration = 0;
-  let lastSuggestion: { text: string; contextKey: string } | null = null;
-  let unavailableTimer: ReturnType<typeof setTimeout> | undefined;
-  let editorInstallTimer: ReturnType<typeof setTimeout> | undefined;
-  let activeContext: ExtensionContext | undefined;
+class PromptSuggestions {
+  private config: SuggestionConfig = { ...DEFAULT_CONFIG };
+  private readonly state: SuggestionViewState = {
+    enabled: DEFAULT_CONFIG.enabled,
+    phase: "idle",
+    suggestion: null,
+  };
+  private activeContext: ExtensionContext | undefined;
+  private request: AbortController | undefined;
+  private generation = 0;
+  private previousSuggestion: { contextKey: string; text: string } | undefined;
+  private unavailableTimer: ReturnType<typeof setTimeout> | undefined;
+  private installTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function updateStatus(ctx: ExtensionContext): void {
-    ctx.ui.setStatus(STATUS_ID, statusText(state));
+  constructor(private readonly pi: ExtensionAPI) {}
+
+  register(): void {
+    this.pi.registerCommand("suggestions", {
+      description: "Toggle follow-up prompt suggestions",
+      handler: async (args, ctx) => {
+        this.activeContext = ctx;
+        const choice = args.trim().toLowerCase();
+        if (choice && choice !== "on" && choice !== "off") {
+          ctx.ui.notify("Usage: /suggestions [on|off]", "error");
+          return;
+        }
+        await this.setEnabled(
+          choice ? choice === "on" : !this.state.enabled,
+          ctx,
+        );
+      },
+    });
+
+    this.pi.registerShortcut("shift+left", {
+      description: "Toggle follow-up prompt suggestions",
+      handler: async (ctx) => {
+        this.activeContext = ctx;
+        await this.setEnabled(!this.state.enabled, ctx);
+      },
+    });
+
+    this.pi.on("session_start", async (_event, ctx) => {
+      this.activeContext = ctx;
+      this.config = await loadConfig();
+      this.patchState({
+        enabled: this.config.enabled,
+        phase: "idle",
+        suggestion: null,
+      });
+      this.installEditor(ctx);
+    });
+
+    this.pi.on("agent_start", async (_event, ctx) => {
+      this.activeContext = ctx;
+      this.cancelRequest();
+      this.patchState({ suggestion: null });
+    });
+
+    this.pi.on("agent_settled", async (_event, ctx) => {
+      this.activeContext = ctx;
+      void this.generate(ctx);
+    });
+
+    this.pi.on("session_shutdown", async () => this.shutdown());
   }
 
-  function clearUnavailableTimer(): void {
-    if (unavailableTimer) clearTimeout(unavailableTimer);
-    unavailableTimer = undefined;
+  private patchState(patch: Partial<SuggestionViewState>): void {
+    Object.assign(this.state, patch);
+    const ctx = this.activeContext;
+    if (!ctx) return;
+    ctx.ui.setStatus(STATUS_ID, statusText(this.state));
   }
 
-  function cancelRequest(ctx?: ExtensionContext): void {
-    requestGeneration++;
-    requestController?.abort();
-    requestController = undefined;
-    clearUnavailableTimer();
-    state.setPhase("idle");
-    if (ctx) updateStatus(ctx);
+  private clearUnavailableTimer(): void {
+    if (this.unavailableTimer) clearTimeout(this.unavailableTimer);
+    this.unavailableTimer = undefined;
   }
 
-  function cancelForEditorInput(): void {
-    cancelRequest(activeContext);
-    if (state.suggestion) state.setSuggestion(null);
+  private cancelRequest(): void {
+    this.generation++;
+    this.request?.abort();
+    this.request = undefined;
+    this.clearUnavailableTimer();
+    if (this.state.phase !== "idle") this.patchState({ phase: "idle" });
   }
 
-  function installEditor(ctx: ExtensionContext): void {
+  private dismiss = (): void => {
+    this.cancelRequest();
+    if (this.state.suggestion) this.patchState({ suggestion: null });
+  };
+
+  private installEditor(ctx: ExtensionContext): void {
     if (ctx.mode !== "tui") return;
-    if (editorInstallTimer) clearTimeout(editorInstallTimer);
+    if (this.installTimer) clearTimeout(this.installTimer);
 
-    // pi-vim also installs a custom editor during session_start. Install on
-    // the next task so we wrap whichever editor the other extensions chose.
-    editorInstallTimer = setTimeout(() => {
-      editorInstallTimer = undefined;
+    // Run after other session_start handlers so this composes with editors such as pi-vim.
+    this.installTimer = setTimeout(() => {
+      this.installTimer = undefined;
       const previous = ctx.ui.getEditorComponent();
       ctx.ui.setEditorComponent((tui, theme, keybindings) => {
         const base =
           previous?.(tui, theme, keybindings) ??
           new CustomEditor(tui, theme, keybindings);
-        return new SuggestionEditor(
-          base,
-          tui,
-          state,
-          cancelForEditorInput,
-        );
+        return new SuggestionEditor(base, this.state, this.dismiss);
       });
     }, 0);
   }
 
-  async function generateSuggestion(ctx: ExtensionContext): Promise<void> {
-    const editorTextLength = ctx.ui.getEditorText().length;
-    const idle = ctx.isIdle();
-    if (!state.enabled || ctx.mode !== "tui" || editorTextLength > 0 || !idle) {
+  private async generate(ctx: ExtensionContext): Promise<void> {
+    if (
+      !this.state.enabled ||
+      ctx.mode !== "tui" ||
+      !ctx.isIdle() ||
+      ctx.ui.getEditorText()
+    ) {
       return;
     }
 
     const context = serializeContext(ctx);
     if (!context) return;
 
-    const contextKey = ctx.sessionManager.getLeafId() ?? context;
-    cancelRequest(ctx);
+    this.cancelRequest();
     const controller = new AbortController();
-    requestController = controller;
-    const generation = requestGeneration;
-    state.setPhase("thinking");
-    updateStatus(ctx);
+    const generation = this.generation;
+    const contextKey = ctx.sessionManager.getLeafId() ?? context;
+    this.request = controller;
+    this.patchState({ phase: "thinking", suggestion: null });
 
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
     try {
-      const raw = await requestOllama(config, context, controller.signal);
+      const raw = await requestSuggestion(
+        this.config,
+        context,
+        controller.signal,
+        ctx,
+      );
       if (
-        generation !== requestGeneration ||
+        generation !== this.generation ||
         controller.signal.aborted ||
-        !state.enabled ||
-        ctx.ui.getEditorText().length > 0
+        !this.state.enabled ||
+        ctx.ui.getEditorText()
       ) {
         return;
       }
 
-      const previousSuggestion = lastSuggestion;
       const previous =
-        previousSuggestion?.contextKey === contextKey
-          ? previousSuggestion.text
+        this.previousSuggestion?.contextKey === contextKey
+          ? this.previousSuggestion.text
           : null;
       const suggestion = validateSuggestion(raw, previous);
-      if (suggestion) {
-        lastSuggestion = { text: suggestion, contextKey };
-        state.setSuggestion(suggestion);
-      }
-      state.setPhase("idle");
-      updateStatus(ctx);
-    } catch (error) {
-      if (generation !== requestGeneration || controller.signal.aborted) return;
-      state.setPhase("unavailable");
-      updateStatus(ctx);
-      clearUnavailableTimer();
-      unavailableTimer = setTimeout(() => {
-        if (state.enabled) {
-          state.setPhase("idle");
-          updateStatus(ctx);
-        }
-      }, 3000);
-      void error;
+      if (suggestion)
+        this.previousSuggestion = { contextKey, text: suggestion };
+      this.patchState({ phase: "idle", suggestion });
+    } catch {
+      // A generation change means user input or lifecycle cleanup intentionally cancelled it.
+      if (generation !== this.generation) return;
+      this.patchState({ phase: "unavailable", suggestion: null });
+      this.clearUnavailableTimer();
+      this.unavailableTimer = setTimeout(() => {
+        if (this.state.enabled) this.patchState({ phase: "idle" });
+      }, UNAVAILABLE_DISPLAY_MS);
     } finally {
       clearTimeout(timeout);
-      if (requestController === controller) requestController = undefined;
+      if (this.request === controller) this.request = undefined;
     }
   }
 
-  async function setEnabled(enabled: boolean, ctx: ExtensionContext): Promise<void> {
-    const wasEnabled = state.enabled;
-    config.enabled = enabled;
-    state.setEnabled(enabled);
-    cancelRequest(ctx);
-    updateStatus(ctx);
+  private async setEnabled(
+    enabled: boolean,
+    ctx: ExtensionContext,
+  ): Promise<void> {
+    const changed = enabled !== this.state.enabled;
+    this.config = { ...this.config, enabled };
+    this.cancelRequest();
+    this.patchState({ enabled, suggestion: null });
 
     try {
-      await saveEnabled(enabled);
+      await saveConfig(this.config);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       ctx.ui.notify(
-        `Could not save prompt suggestion preference: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Could not save prompt suggestion preference: ${message}`,
         "error",
       );
     }
 
     if (
       enabled &&
-      !wasEnabled &&
+      changed &&
       ctx.mode === "tui" &&
       ctx.isIdle() &&
-      ctx.ui.getEditorText().length === 0
+      !ctx.ui.getEditorText()
     ) {
-      void generateSuggestion(ctx);
+      void this.generate(ctx);
     }
   }
 
-  pi.registerCommand("suggestions", {
-    description: "Toggle follow-up prompt suggestions",
-    handler: async (args, ctx) => {
-      activeContext = ctx;
-      const choice = args.trim().toLowerCase();
-      if (choice && choice !== "on" && choice !== "off") {
-        ctx.ui.notify("Usage: /suggestions [on|off]", "error");
-        return;
-      }
-      const enabled = choice === "on" ? true : choice === "off" ? false : !state.enabled;
-      await setEnabled(enabled, ctx);
-    },
-  });
+  private shutdown(): void {
+    if (this.installTimer) clearTimeout(this.installTimer);
+    this.installTimer = undefined;
+    this.cancelRequest();
+    this.state.suggestion = null;
+    this.activeContext = undefined;
+  }
+}
 
-  pi.registerShortcut("shift+left", {
-    description: "Toggle follow-up prompt suggestions",
-    handler: async (ctx) => {
-      activeContext = ctx;
-      await setEnabled(!state.enabled, ctx);
-    },
-  });
-
-  pi.on("session_start", async (_event, ctx) => {
-    activeContext = ctx;
-    config = await loadConfig();
-    state.setEnabled(config.enabled);
-    state.setPhase("idle");
-    installEditor(ctx);
-    updateStatus(ctx);
-  });
-
-  pi.on("agent_start", async (_event, ctx) => {
-    activeContext = ctx;
-    cancelRequest(ctx);
-    state.setSuggestion(null);
-  });
-
-  pi.on("agent_settled", async (_event, ctx) => {
-    activeContext = ctx;
-    void generateSuggestion(ctx);
-  });
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    if (editorInstallTimer) clearTimeout(editorInstallTimer);
-    editorInstallTimer = undefined;
-    cancelRequest(ctx);
-    state.setSuggestion(null);
-    clearUnavailableTimer();
-    activeContext = undefined;
-  });
+export default function promptSuggestionsExtension(pi: ExtensionAPI): void {
+  new PromptSuggestions(pi).register();
 }
