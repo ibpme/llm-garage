@@ -7,7 +7,13 @@
  * Multi-select: checkbox-style selections per question
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type ExtensionAPI,
+  type SessionEntry,
+  type SessionTreeNode,
+  TreeSelectorComponent,
+} from "@earendil-works/pi-coding-agent";
 import {
   Editor,
   type EditorTheme,
@@ -58,6 +64,257 @@ interface QuestionnaireResult {
   cancelled: boolean;
 }
 
+interface ReanswerCandidate {
+  resultEntryId: string;
+  toolCallId: string;
+  questions: Question[];
+  previousAnswers: Answer[];
+}
+
+interface ReanswerMessageDetails {
+  toolCallId: string;
+  result: QuestionnaireResult;
+}
+
+const REANSWER_MESSAGE_TYPE = "question-reanswer";
+
+function parseQuestions(value: unknown): Question[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+
+  const questions: Question[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const candidate = value[i];
+    if (!candidate || typeof candidate !== "object") return undefined;
+
+    const raw = candidate as Record<string, unknown>;
+    if (
+      typeof raw.id !== "string" ||
+      raw.id.length === 0 ||
+      typeof raw.prompt !== "string" ||
+      !Array.isArray(raw.options)
+    ) {
+      return undefined;
+    }
+
+    const options: QuestionOption[] = [];
+    for (const option of raw.options) {
+      if (!option || typeof option !== "object") return undefined;
+      const optionRaw = option as Record<string, unknown>;
+      if (
+        typeof optionRaw.value !== "string" ||
+        typeof optionRaw.label !== "string" ||
+        (optionRaw.description !== undefined &&
+          typeof optionRaw.description !== "string")
+      ) {
+        return undefined;
+      }
+      options.push({
+        value: optionRaw.value,
+        label: optionRaw.label,
+        ...(optionRaw.description === undefined
+          ? {}
+          : { description: optionRaw.description }),
+      });
+    }
+
+    questions.push({
+      id: raw.id,
+      label:
+        typeof raw.label === "string" && raw.label.length > 0
+          ? raw.label
+          : `Q${i + 1}`,
+      prompt: raw.prompt,
+      options,
+      multiSelect: raw.multiSelect === true,
+    });
+  }
+
+  return questions;
+}
+
+function parseAnswers(value: unknown): Answer[] {
+  if (!Array.isArray(value)) return [];
+
+  const answers: Answer[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const raw = candidate as Record<string, unknown>;
+    if (typeof raw.id !== "string" || !Array.isArray(raw.values)) continue;
+
+    const values: AnswerValue[] = [];
+    for (const answerValue of raw.values) {
+      if (!answerValue || typeof answerValue !== "object") continue;
+      const answerRaw = answerValue as Record<string, unknown>;
+      if (
+        typeof answerRaw.value !== "string" ||
+        typeof answerRaw.label !== "string" ||
+        typeof answerRaw.wasCustom !== "boolean"
+      ) {
+        continue;
+      }
+      values.push({
+        value: answerRaw.value,
+        label: answerRaw.label,
+        wasCustom: answerRaw.wasCustom,
+        ...(typeof answerRaw.index === "number"
+          ? { index: answerRaw.index }
+          : {}),
+      });
+    }
+    if (values.length > 0) answers.push({ id: raw.id, values });
+  }
+
+  return answers;
+}
+
+function formatAnswers(questions: Question[], answers: Answer[]): string {
+  return answers
+    .map((answer) => {
+      const questionLabel =
+        questions.find((question) => question.id === answer.id)?.label ||
+        answer.id;
+      const values = answer.values.map((value) => {
+        if (value.wasCustom) {
+          return `(wrote) ${value.label} [value: ${JSON.stringify(value.value)}]`;
+        }
+        return `${value.index}. ${value.label} [value: ${JSON.stringify(value.value)}]`;
+      });
+      return `${questionLabel}: ${values.join(", ")}`;
+    })
+    .join("\n");
+}
+
+const QUESTION_TREE_PROTOTYPE_PATCH = Symbol.for(
+  "llm-garage.question-tree-filter-prototype-patch",
+);
+const QUESTION_TREE_INSTANCE_PATCH = Symbol(
+  "llm-garage.question-tree-filter-instance-patch",
+);
+
+function visibleQuestionEntry(entry: SessionEntry): SessionEntry {
+  if (
+    entry.type !== "message" ||
+    entry.message.role !== "toolResult" ||
+    entry.message.toolName !== "question"
+  ) {
+    return entry;
+  }
+
+  const details = entry.message.details as
+    | { questions?: unknown; answers?: unknown }
+    | undefined;
+  const questions = parseQuestions(details?.questions);
+  const answers = parseAnswers(details?.answers);
+  const prompts = questions?.map((question) => question.prompt).join(" | ");
+  const formattedAnswers = questions
+    ? formatAnswers(questions, answers).replaceAll("\n", "; ")
+    : "";
+  const content = [prompts, formattedAnswers].filter(Boolean).join(" — ");
+
+  return {
+    type: "custom_message",
+    id: entry.id,
+    parentId: entry.parentId,
+    timestamp: entry.timestamp,
+    customType: "question",
+    content: content || "Questionnaire",
+    display: true,
+  };
+}
+
+function installQuestionTreeFilterPatch(): void {
+  type TreeListInternals = {
+    flatNodes: Array<{ node: SessionTreeNode }>;
+    applyFilter(): void;
+  };
+  type TreeSelectorInternals = {
+    treeList: TreeListInternals;
+    [QUESTION_TREE_INSTANCE_PATCH]?: boolean;
+  };
+  type TreeSelectorPrototype = typeof TreeSelectorComponent.prototype & {
+    [QUESTION_TREE_PROTOTYPE_PATCH]?: boolean;
+  };
+
+  const prototype = TreeSelectorComponent.prototype as TreeSelectorPrototype;
+  if (prototype[QUESTION_TREE_PROTOTYPE_PATCH]) return;
+
+  const originalRender = prototype.render;
+  prototype.render = function patchedQuestionTreeRender(width: number) {
+    const selector = this as unknown as TreeSelectorInternals;
+    if (!selector[QUESTION_TREE_INSTANCE_PATCH]) {
+      let changed = false;
+      for (const flatNode of selector.treeList.flatNodes) {
+        const visibleEntry = visibleQuestionEntry(flatNode.node.entry);
+        if (visibleEntry !== flatNode.node.entry) {
+          flatNode.node.entry = visibleEntry;
+          changed = true;
+        }
+      }
+      if (changed) selector.treeList.applyFilter();
+      selector[QUESTION_TREE_INSTANCE_PATCH] = true;
+    }
+    return originalRender.call(this, width);
+  };
+  prototype[QUESTION_TREE_PROTOTYPE_PATCH] = true;
+}
+
+function findReanswerCandidates(
+  branch: SessionEntry[],
+): ReanswerCandidate[] {
+  const resultsByCallId = new Map<
+    string,
+    { entryId: string; questions?: Question[]; answers: Answer[] }
+  >();
+
+  for (const entry of branch) {
+    if (
+      entry.type !== "message" ||
+      entry.message.role !== "toolResult" ||
+      entry.message.toolName !== "question"
+    ) {
+      continue;
+    }
+
+    const details = entry.message.details as
+      | { questions?: unknown; answers?: unknown }
+      | undefined;
+    resultsByCallId.set(entry.message.toolCallId, {
+      entryId: entry.id,
+      questions: parseQuestions(details?.questions),
+      answers: parseAnswers(details?.answers),
+    });
+  }
+
+  const candidates: ReanswerCandidate[] = [];
+  for (const entry of branch) {
+    if (entry.type !== "message" || entry.message.role !== "assistant") {
+      continue;
+    }
+
+    for (const content of entry.message.content) {
+      if (content.type !== "toolCall" || content.name !== "question") continue;
+      const result = resultsByCallId.get(content.id);
+      if (!result) continue;
+
+      const callArguments = content.arguments as
+        | { questions?: unknown }
+        | undefined;
+      const questions =
+        result.questions || parseQuestions(callArguments?.questions);
+      if (!questions) continue;
+
+      candidates.push({
+        resultEntryId: result.entryId,
+        toolCallId: content.id,
+        questions,
+        previousAnswers: result.answers,
+      });
+    }
+  }
+
+  return candidates;
+}
+
 // Schema
 const QuestionOptionSchema = Type.Object({
   value: Type.String({ description: "Returned value" }),
@@ -78,7 +335,11 @@ const QuestionnaireParams = Type.Object({
 });
 
 export default function questionnaire(pi: ExtensionAPI) {
-  pi.registerTool({
+  installQuestionTreeFilterPatch();
+
+  let initialAnswersForNextExecution: Answer[] | undefined;
+
+  const questionTool = defineTool({
     // name: "questionnaire", Custom override
     // label: "Questionnaire",
     name: "question",
@@ -98,6 +359,8 @@ export default function questionnaire(pi: ExtensionAPI) {
         label: q.label || `Q${i + 1}`,
         multiSelect: q.multiSelect === true,
       }));
+      const initialAnswers = initialAnswersForNextExecution;
+      initialAnswersForNextExecution = undefined;
 
       const questionIds = new Set<string>();
       for (const question of questions) {
@@ -135,6 +398,34 @@ export default function questionnaire(pi: ExtensionAPI) {
           const selections = new Map<string, Set<number>>();
           const customInputs = new Map<string, string>();
           const confirmed = new Set<string>();
+
+          for (const answer of initialAnswers || []) {
+            const question = questions.find((item) => item.id === answer.id);
+            if (!question) continue;
+
+            const selected = new Set<number>();
+            for (const value of answer.values) {
+              if (value.wasCustom) {
+                customInputs.set(question.id, value.value);
+                selected.add(question.options.length);
+                continue;
+              }
+
+              const optionIndex = question.options.findIndex(
+                (option) => option.value === value.value,
+              );
+              if (optionIndex >= 0) selected.add(optionIndex);
+            }
+            if (selected.size > 0) {
+              selections.set(question.id, selected);
+              confirmed.add(question.id);
+            }
+          }
+
+          const firstSelection = selections.get(questions[0].id);
+          if (firstSelection && firstSelection.size > 0) {
+            optionIndex = Math.min(...firstSelection);
+          }
 
           // Editor for "Type something" option
           const editorTheme: EditorTheme = {
@@ -658,19 +949,8 @@ export default function questionnaire(pi: ExtensionAPI) {
         };
       }
 
-      const answerLines = result.answers.map((a) => {
-        const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
-        const parts = a.values.map((v) => {
-          if (v.wasCustom) {
-            return `(wrote) ${v.label} [value: ${JSON.stringify(v.value)}]`;
-          }
-          return `${v.index}. ${v.label} [value: ${JSON.stringify(v.value)}]`;
-        });
-        return `${qLabel}: ${parts.join(", ")}`;
-      });
-
       return {
-        content: [{ type: "text", text: answerLines.join("\n") }],
+        content: [{ type: "text", text: formatAnswers(questions, result.answers) }],
         details: result,
       };
     },
@@ -706,6 +986,157 @@ export default function questionnaire(pi: ExtensionAPI) {
         return `${theme.fg("success", "✓ ")}${theme.fg("accent", a.id)}: ${parts.join(", ")}`;
       });
       return new Text(lines.join("\n"), 0, 0);
+    },
+  });
+
+  pi.registerTool(questionTool);
+
+  pi.registerMessageRenderer<ReanswerMessageDetails>(
+    REANSWER_MESSAGE_TYPE,
+    (message, _options, theme) => {
+      const details = message.details;
+      if (!details) {
+        return new Text(theme.fg("warning", "Revised questionnaire answers"), 0, 0);
+      }
+
+      const heading = theme.fg(
+        "accent",
+        theme.bold("Revised questionnaire answers"),
+      );
+      const answers = formatAnswers(
+        details.result.questions,
+        details.result.answers,
+      );
+      return new Text(`${heading}\n${theme.fg("text", answers)}`, 0, 0);
+    },
+  );
+
+  pi.on("context", (event) => {
+    const replacements = new Map<string, QuestionnaireResult>();
+    for (const message of event.messages) {
+      if (
+        message.role === "custom" &&
+        message.customType === REANSWER_MESSAGE_TYPE
+      ) {
+        const details = message.details as ReanswerMessageDetails | undefined;
+        if (details) replacements.set(details.toolCallId, details.result);
+      }
+    }
+    if (replacements.size === 0) return;
+
+    const messages = event.messages
+      .filter(
+        (message) =>
+          !(
+            message.role === "custom" &&
+            message.customType === REANSWER_MESSAGE_TYPE
+          ),
+      )
+      .map((message) => {
+        if (message.role !== "toolResult") return message;
+
+        const replacement = replacements.get(message.toolCallId);
+        if (!replacement) return message;
+        return {
+          ...message,
+          content: [
+            {
+              type: "text" as const,
+              text: formatAnswers(
+                replacement.questions,
+                replacement.answers,
+              ),
+            },
+          ],
+          details: replacement,
+          isError: false,
+        };
+      });
+    return { messages };
+  });
+
+  pi.registerCommand("reanswer", {
+    description:
+      "Reopen a completed question tool call and branch with revised answers",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("/reanswer is only available in interactive TUI mode", "error");
+        return;
+      }
+
+      await ctx.waitForIdle();
+      const candidates = findReanswerCandidates(ctx.sessionManager.getBranch());
+      if (candidates.length === 0) {
+        ctx.ui.notify("No completed question tool calls on this branch", "warning");
+        return;
+      }
+
+      const newestFirst = [...candidates].reverse();
+      let candidate = newestFirst[0];
+      if (newestFirst.length > 1) {
+        const labels = newestFirst.map((item, index) => {
+          const questionLabels = item.questions
+            .map((question) => question.label)
+            .join(", ");
+          const previous = formatAnswers(
+            item.questions,
+            item.previousAnswers,
+          )
+            .replaceAll("\n", "; ")
+            .slice(0, 120);
+          return `${index + 1}. ${questionLabels}${previous ? ` — ${previous}` : ""}`;
+        });
+        const selected = await ctx.ui.select(
+          "Re-answer which questionnaire?",
+          labels,
+        );
+        if (selected === undefined) return;
+        candidate = newestFirst[labels.indexOf(selected)];
+      }
+
+      initialAnswersForNextExecution = candidate.previousAnswers;
+      let rerun;
+      try {
+        rerun = await questionTool.execute(
+          `reanswer-${candidate.toolCallId}`,
+          { questions: candidate.questions },
+          undefined,
+          undefined,
+          ctx,
+        );
+      } finally {
+        initialAnswersForNextExecution = undefined;
+      }
+      const revised = rerun.details as QuestionnaireResult | undefined;
+      if (!revised || revised.cancelled) {
+        ctx.ui.notify("Re-answer cancelled", "info");
+        return;
+      }
+
+      const navigation = await ctx.navigateTree(candidate.resultEntryId, {
+        summarize: false,
+      });
+      if (navigation.cancelled) {
+        ctx.ui.notify("Could not create the re-answer branch", "error");
+        return;
+      }
+
+      const formatted = formatAnswers(revised.questions, revised.answers);
+      pi.sendMessage(
+        {
+          customType: REANSWER_MESSAGE_TYPE,
+          content:
+            "The user reopened the questionnaire and revised their answers. " +
+            "These answers supersede the earlier question tool result; use only " +
+            `the revised answers below.\n\n${formatted}`,
+          display: true,
+          details: {
+            toolCallId: candidate.toolCallId,
+            result: revised,
+          } satisfies ReanswerMessageDetails,
+        },
+        { triggerTurn: true },
+      );
     },
   });
 }
