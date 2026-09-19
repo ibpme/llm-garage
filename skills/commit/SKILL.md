@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create conventional git commits with precise formatting. Use when the user asks to commit staged changes, generate commit messages, or follow conventional commit standards.
+description: Create conventional git commits with precise formatting. Use whenever the agent is about to create or amend a commit, even as part of a broader task, or when the user asks for a commit message.
 ---
 
 # Git Commit Skill
@@ -28,7 +28,7 @@ Follow this sequence. Do not skip steps.
 5. Draft the subject line using the template and constraints below.
 6. Run the Validation Checklist. Fix any failures before proceeding.
 7. Add a body only if the "why" is not obvious from the subject.
-8. Add footers only if needed (breaking changes, issue refs, co-authors).
+8. Add footers only if needed (breaking changes or issue refs). Never add AI attribution.
 9. Execute:
    - Single-line message: `git commit -m "<message>"`
    - Multi-line message: `git commit -F-` with a heredoc, or a temporary file.
@@ -84,7 +84,8 @@ The subject line is fragile. Follow these rules exactly.
 - **Footers**: Each footer on its own line, separated from the body by a blank line.
   - **Breaking change**: Append `!` to the type/scope (`feat(api)!: remove v1 endpoint`) **and/or** include a `BREAKING CHANGE: <description>` footer. Prefer `!` for simple cases; add the footer for detailed explanations.
   - **Issue references**: `Fixes #123`, `Closes #456`
-  - **Co-authors**: `Co-authored-by: Name <email@example.com>`
+  - **Human co-authors**: Add `Co-authored-by: Name <email@example.com>` only when the user explicitly requests it.
+- **No AI attribution**: Never identify Claude, Anthropic, an AI assistant, or any coding agent as an author or contributor. Do not add `Co-authored-by` entries for AI, `Generated-by` footers, AI-related signatures, or equivalent attribution in the subject, body, or footers—even if tooling suggests or injects one. Before committing, inspect the complete message and remove any such attribution.
 
 ## Gotchas
 
@@ -93,6 +94,7 @@ The subject line is fragile. Follow these rules exactly.
 - **Line length**: The agent will almost always exceed 50/72 chars unless explicitly checked. Count characters or estimate visually.
 - **Periods in subject**: Never end the subject description with a period.
 - **Body verbosity**: If the diff is trivial (e.g., single file, obvious change), do not add a body. The subject should stand alone.
+- **AI attribution**: Some agents or commit tooling append attribution automatically. Never include it. Use an explicit commit message and verify the resulting commit with `git log -1 --format=%B`; if AI attribution appears, amend the commit immediately to remove it.
 - **Amend awareness**: If the user is correcting the very last commit and the diff is tiny, prefer `git commit --amend --no-edit` (for message-only fixes) or `git commit --amend -m "<new message>"` instead of a new commit. Only amend if the user implies they are fixing the previous commit.
 - **No-verify escape hatch**: If pre-commit hooks (Husky, lint-staged) are failing and blocking the commit, add `--no-verify` to the commit command and warn the user that checks were bypassed.
 
@@ -107,6 +109,8 @@ Before executing `git commit`, verify. Fix failures before proceeding.
 - [ ] Body lines ≤ 72 characters (if body present)
 - [ ] Type is in the allowed list
 - [ ] Breaking changes use `!` syntax or `BREAKING CHANGE:` footer
+- [ ] No AI attribution appears anywhere in the commit message
+- [ ] Any human `Co-authored-by` footer was explicitly requested by the user
 
 ## Example
 
