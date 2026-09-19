@@ -37,7 +37,6 @@ interface Question {
   label: string;
   prompt: string;
   options: QuestionOption[];
-  allowOther: boolean;
   multiSelect: boolean;
 }
 
@@ -61,52 +60,22 @@ interface QuestionnaireResult {
 
 // Schema
 const QuestionOptionSchema = Type.Object({
-  value: Type.String({ description: "The value returned when selected" }),
-  label: Type.String({ description: "Display label for the option" }),
-  description: Type.Optional(
-    Type.String({ description: "Optional description shown below label" }),
-  ),
+  value: Type.String({ description: "Returned value" }),
+  label: Type.String({ description: "Shown text" }),
+  description: Type.Optional(Type.String({ description: "Optional detail" })),
 });
 
 const QuestionSchema = Type.Object({
-  id: Type.String({ description: "Unique identifier for this question" }),
-  label: Type.Optional(
-    Type.String({
-      description:
-        "Short contextual label for tab bar, e.g. 'Scope', 'Priority' (defaults to Q1, Q2)",
-    }),
-  ),
-  prompt: Type.String({ description: "The full question text to display" }),
-  options: Type.Array(QuestionOptionSchema, {
-    description: "Available options to choose from",
-  }),
-  allowOther: Type.Optional(
-    Type.Boolean({
-      description: "Allow 'Type something' option (default: true)",
-    }),
-  ),
-  multiSelect: Type.Optional(
-    Type.Boolean({
-      description: "Allow multiple selections (checkbox style) (default: false)",
-    }),
-  ),
+  id: Type.String({ minLength: 1, description: "Unique ID" }),
+  label: Type.Optional(Type.String({ description: "Short tab label" })),
+  prompt: Type.String({ description: "Question text" }),
+  options: Type.Array(QuestionOptionSchema),
+  multiSelect: Type.Optional(Type.Boolean({ description: "Allow multiple" })),
 });
 
 const QuestionnaireParams = Type.Object({
-  questions: Type.Array(QuestionSchema, {
-    description: "Questions to ask the user",
-  }),
+  questions: Type.Array(QuestionSchema, { minItems: 1 }),
 });
-
-function errorResult(
-  message: string,
-  questions: Question[] = [],
-): { content: { type: "text"; text: string }[]; details: QuestionnaireResult } {
-  return {
-    content: [{ type: "text", text: message }],
-    details: { questions, answers: [], cancelled: true },
-  };
-}
 
 export default function questionnaire(pi: ExtensionAPI) {
   pi.registerTool({
@@ -114,27 +83,39 @@ export default function questionnaire(pi: ExtensionAPI) {
     // label: "Questionnaire",
     name: "question",
     label: "Question(s) tool",
-    description:
-      "Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. For single questions, shows a simple option list. For multiple questions, shows a tab-based interface. Supports multi-select (checkbox) questions.",
+    description: "Ask the user one or more single or multi-select questions.",
     parameters: QuestionnaireParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (ctx.mode !== "tui") {
-        return errorResult(
-          "Error: UI not available (running in non-interactive mode)",
+        throw new Error(
+          "Question UI is only available in interactive TUI mode",
         );
       }
-      if (params.questions.length === 0) {
-        return errorResult("Error: No questions provided");
-      }
 
-      // Normalize questions with defaults
       const questions: Question[] = params.questions.map((q, i) => ({
         ...q,
         label: q.label || `Q${i + 1}`,
-        allowOther: q.allowOther !== false,
         multiSelect: q.multiSelect === true,
       }));
+
+      const questionIds = new Set<string>();
+      for (const question of questions) {
+        if (questionIds.has(question.id)) {
+          throw new Error(`Duplicate question id: ${question.id}`);
+        }
+        questionIds.add(question.id);
+
+        const optionValues = new Set<string>();
+        for (const option of question.options) {
+          if (optionValues.has(option.value)) {
+            throw new Error(
+              `Question ${question.id} has duplicate option value: ${option.value}`,
+            );
+          }
+          optionValues.add(option.value);
+        }
+      }
 
       const isMulti = questions.length > 1;
       const totalTabs = questions.length + 1; // questions + Submit
@@ -146,6 +127,8 @@ export default function questionnaire(pi: ExtensionAPI) {
           let optionIndex = 0;
           let inputMode = false;
           let inputQuestionId: string | null = null;
+          let validationMessage: string | undefined;
+          let cachedWidth: number | undefined;
           let cachedLines: string[] | undefined;
 
           // Per-question state
@@ -168,6 +151,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 
           // Helpers
           function refresh() {
+            cachedWidth = undefined;
             cachedLines = undefined;
             tui.requestRender();
           }
@@ -234,17 +218,13 @@ export default function questionnaire(pi: ExtensionAPI) {
               ...o,
               isSelected: sel.has(i),
             }));
-            if (q.allowOther) {
-              const hasCustom = customInputs.has(q.id);
-              opts.push({
-                value: "__other__",
-                label: hasCustom
-                  ? customInputs.get(q.id)!
-                  : "Type something.",
-                isOther: true,
-                isSelected: sel.has(q.options.length),
-              });
-            }
+            const hasCustom = customInputs.has(q.id);
+            opts.push({
+              value: "__other__",
+              label: hasCustom ? customInputs.get(q.id)! : "Type something.",
+              isOther: true,
+              isSelected: sel.has(q.options.length),
+            });
             if (q.multiSelect) {
               opts.push({
                 value: "__done__",
@@ -256,12 +236,11 @@ export default function questionnaire(pi: ExtensionAPI) {
           }
 
           function allAnswered(): boolean {
-            return questions.every((q) => {
-              if (q.multiSelect) {
-                return confirmed.has(q.id);
-              }
-              return selections.has(q.id);
-            });
+            return questions.every((q) =>
+              q.multiSelect
+                ? confirmed.has(q.id) && buildAnswer(q.id) !== undefined
+                : buildAnswer(q.id) !== undefined,
+            );
           }
 
           function advanceAfterAnswer() {
@@ -286,6 +265,8 @@ export default function questionnaire(pi: ExtensionAPI) {
             if (!q) return;
 
             customInputs.set(inputQuestionId, trimmed);
+            confirmed.delete(q.id);
+            validationMessage = undefined;
 
             const otherIdx = q.options.length;
             const sel = selections.get(inputQuestionId) || new Set<number>();
@@ -305,6 +286,8 @@ export default function questionnaire(pi: ExtensionAPI) {
           };
 
           function toggleSelection(q: Question, optIdx: number) {
+            confirmed.delete(q.id);
+            validationMessage = undefined;
             const sel = selections.get(q.id) || new Set<number>();
             if (sel.has(optIdx)) {
               sel.delete(optIdx);
@@ -344,9 +327,7 @@ export default function questionnaire(pi: ExtensionAPI) {
             // Tab navigation (multi-question only)
             if (isMulti) {
               if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
-                if (q && q.multiSelect) {
-                  confirmed.add(q.id);
-                }
+                validationMessage = undefined;
                 currentTab = (currentTab + 1) % totalTabs;
                 optionIndex = 0;
                 refresh();
@@ -356,9 +337,7 @@ export default function questionnaire(pi: ExtensionAPI) {
                 matchesKey(data, Key.shift("tab")) ||
                 matchesKey(data, Key.left)
               ) {
-                if (q && q.multiSelect) {
-                  confirmed.add(q.id);
-                }
+                validationMessage = undefined;
                 currentTab = (currentTab - 1 + totalTabs) % totalTabs;
                 optionIndex = 0;
                 refresh();
@@ -369,18 +348,14 @@ export default function questionnaire(pi: ExtensionAPI) {
             // Vim tab navigation (multi-question only)
             if (isMulti) {
               if (data === "l") {
-                if (q && q.multiSelect) {
-                  confirmed.add(q.id);
-                }
+                validationMessage = undefined;
                 currentTab = (currentTab + 1) % totalTabs;
                 optionIndex = 0;
                 refresh();
                 return;
               }
               if (data === "h") {
-                if (q && q.multiSelect) {
-                  confirmed.add(q.id);
-                }
+                validationMessage = undefined;
                 currentTab = (currentTab - 1 + totalTabs) % totalTabs;
                 optionIndex = 0;
                 refresh();
@@ -423,6 +398,7 @@ export default function questionnaire(pi: ExtensionAPI) {
             // Select / toggle option
             if (matchesKey(data, Key.enter) && q) {
               const opt = opts[optionIndex];
+              if (!opt) return;
               if (opt.isOther) {
                 inputMode = true;
                 inputQuestionId = q.id;
@@ -431,7 +407,14 @@ export default function questionnaire(pi: ExtensionAPI) {
                 return;
               }
               if (opt.isDone) {
+                if (!buildAnswer(q.id)) {
+                  validationMessage =
+                    "Select at least one option before choosing Done";
+                  refresh();
+                  return;
+                }
                 confirmed.add(q.id);
+                validationMessage = undefined;
                 advanceAfterAnswer();
                 return;
               }
@@ -441,6 +424,7 @@ export default function questionnaire(pi: ExtensionAPI) {
               }
               // Single-select
               selections.set(q.id, new Set([optionIndex]));
+              validationMessage = undefined;
               advanceAfterAnswer();
               return;
             }
@@ -468,7 +452,7 @@ export default function questionnaire(pi: ExtensionAPI) {
           }
 
           function render(width: number): string[] {
-            if (cachedLines) return cachedLines;
+            if (cachedLines && cachedWidth === width) return cachedLines;
 
             const lines: string[] = [];
             const renderWidth = Math.max(1, width);
@@ -532,9 +516,7 @@ export default function questionnaire(pi: ExtensionAPI) {
                 const isOther = opt.isOther === true;
                 const isDone = opt.isDone === true;
 
-                const cursorPrefix = selected
-                  ? theme.fg("accent", "> ")
-                  : "  ";
+                const cursorPrefix = selected ? theme.fg("accent", "> ") : "  ";
                 const checkPrefix =
                   q?.multiSelect && !isDone
                     ? opt.isSelected
@@ -618,31 +600,44 @@ export default function questionnaire(pi: ExtensionAPI) {
             }
 
             lines.push("");
+            if (validationMessage) {
+              addWrappedWithPrefix(" ", theme.fg("warning", validationMessage));
+              lines.push("");
+            }
             if (!inputMode) {
               let help: string;
               if (isMulti) {
-                help =
-                  q?.multiSelect
-                    ? "Tab/h/l navigate • ↑↓/j/k/g/G select • Space/Enter toggle • Esc cancel"
-                    : "Tab/h/l navigate • ↑↓/j/k/g/G select • Enter confirm • Esc cancel";
+                help = q?.multiSelect
+                  ? "Tab/h/l navigate • ↑↓/j/k/g/G select • Space/Enter toggle • Esc cancel"
+                  : "Tab/h/l navigate • ↑↓/j/k/g/G select • Enter confirm • Esc cancel";
               } else {
-                help =
-                  q?.multiSelect
-                    ? "↑↓/j/k/g/G select • Space/Enter toggle • Esc cancel"
-                    : "↑↓/j/k/g/G select • Enter select • Esc cancel";
+                help = q?.multiSelect
+                  ? "↑↓/j/k/g/G select • Space/Enter toggle • Esc cancel"
+                  : "↑↓/j/k/g/G select • Enter select • Esc cancel";
               }
               addWrappedWithPrefix(" ", theme.fg("dim", help));
             }
             lines.push(theme.fg("accent", "─".repeat(renderWidth)));
 
+            cachedWidth = width;
             cachedLines = lines;
             return lines;
           }
 
+          let focused = false;
           return {
+            get focused() {
+              return focused;
+            },
+            set focused(value: boolean) {
+              focused = value;
+              editor.focused = value;
+            },
             render,
             invalidate: () => {
+              cachedWidth = undefined;
               cachedLines = undefined;
+              editor.invalidate();
             },
             handleInput,
           };
@@ -659,8 +654,10 @@ export default function questionnaire(pi: ExtensionAPI) {
       const answerLines = result.answers.map((a) => {
         const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
         const parts = a.values.map((v) => {
-          if (v.wasCustom) return `(wrote) ${v.label}`;
-          return `${v.index}. ${v.label}`;
+          if (v.wasCustom) {
+            return `(wrote) ${v.label} [value: ${JSON.stringify(v.value)}]`;
+          }
+          return `${v.index}. ${v.label} [value: ${JSON.stringify(v.value)}]`;
         });
         return `${qLabel}: ${parts.join(", ")}`;
       });
@@ -675,7 +672,7 @@ export default function questionnaire(pi: ExtensionAPI) {
       const qs = (args.questions as Question[]) || [];
       const count = qs.length;
       const labels = qs.map((q) => q.label || q.id).join(", ");
-      let text = theme.fg("toolTitle", theme.bold("Question Tool"));
+      let text = theme.fg("toolTitle", theme.bold("Question Tool "));
       text += theme.fg("muted", `${count} question${count !== 1 ? "s" : ""}`);
       if (labels) {
         text += theme.fg("dim", ` (${labels})`);
