@@ -9,8 +9,8 @@
  * - No animated border. `registerMarkdownTransformer` only controls the
  *   Markdown source; pi renders the resulting blockquote with a static
  *   `mdQuoteBorder` color, redrawn per streaming update.
- * - The "loading" signal while expanded rides on the built-in working
- *   message (`setWorkingMessage`), not the border itself.
+ * - The agent-stats extension owns the built-in working message so it can
+ *   display phase-aware cycle timing without competing updates.
  */
 
 import type {
@@ -20,7 +20,6 @@ import type {
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const SPINNER_INTERVAL_MS = 100;
-const WORKING_MESSAGE = "Thinking...";
 
 export default function (pi: ExtensionAPI) {
   let spinnerTimer: ReturnType<typeof setInterval> | undefined;
@@ -31,13 +30,11 @@ export default function (pi: ExtensionAPI) {
     clearInterval(spinnerTimer);
     spinnerTimer = undefined;
     ctx.ui.setHiddenThinkingLabel();
-    ctx.ui.setWorkingMessage();
   }
 
   function startSpinner(ctx: ExtensionContext) {
     if (spinnerTimer) return;
     frame = 0;
-    ctx.ui.setWorkingMessage(WORKING_MESSAGE);
     spinnerTimer = setInterval(() => {
       const icon = SPINNER_FRAMES[frame % SPINNER_FRAMES.length];
       frame++;

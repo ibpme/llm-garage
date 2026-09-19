@@ -59,10 +59,13 @@ interface ActiveTool {
 	startOffsetMs: number;
 }
 
+type CyclePhase = "waiting" | "thinking" | "responding" | "preparing-tools" | "tools";
+
 interface ActiveCycle {
 	turnIndex: number;
 	startedAt: number;
 	startedWallTime: number;
+	phase: CyclePhase;
 	providerRequestAt?: number;
 	firstGeneratedAt?: number;
 	generationEndedAt?: number;
@@ -185,6 +188,23 @@ function formatDuration(ms: number | undefined): string {
 
 function formatRate(rate: number | undefined): string {
 	return rate === undefined || !Number.isFinite(rate) ? "n/a" : `${rate.toFixed(1)} TPS`;
+}
+
+function formatLiveCounter(ms: number): string {
+	return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
+
+function phaseLabel(phase: Exclude<CyclePhase, "tools">): string {
+	switch (phase) {
+		case "waiting":
+			return "Waiting...";
+		case "thinking":
+			return "Thinking...";
+		case "responding":
+			return "Responding...";
+		case "preparing-tools":
+			return "Preparing tools...";
+	}
 }
 
 function formatTokens(tokens: number): string {
@@ -354,42 +374,25 @@ function formatDetail(
 
 function statusText(
 	ctx: ExtensionContext,
-	cycle: ActiveCycle | undefined,
 	cycles: readonly PersistedCycle[],
 	toolStats: Map<string, ToolStat>,
 ): string {
 	const theme = ctx.ui.theme;
-	if (cycle) {
-		const current = now();
-		if (cycle.activeTools.size > 0) {
-			const active = Array.from(cycle.activeTools.values());
-			const elapsed = current - Math.min(...active.map((tool) => tool.startedAt));
-			const label = active.length === 1 ? active[0].name : `${active.length} tools`;
-			return theme.fg("warning", label) + theme.fg("dim", ` ${formatDuration(elapsed)}`);
-		}
-		if (cycle.firstGeneratedAt !== undefined && cycle.generationEndedAt === undefined) {
-			return theme.fg("success", "generating") + theme.fg("dim", ` ${formatDuration(current - cycle.firstGeneratedAt)}`);
-		}
-		if (cycle.providerRequestAt !== undefined && cycle.firstGeneratedAt === undefined) {
-			return theme.fg("accent", "waiting first token") +
-				theme.fg("dim", ` ${formatDuration(current - cycle.providerRequestAt)}`);
-		}
-		return theme.fg("accent", "agent") + theme.fg("dim", ` ${formatDuration(current - cycle.startedAt)}`);
-	}
-
 	const last = cycles[cycles.length - 1];
-	if (!last) return theme.fg("dim", `${totalToolCalls(toolStats)} tools · no timing yet`);
+	if (!last) return theme.fg("dim", `${totalToolCalls(toolStats)} tools · 0s total`);
+	const totalElapsedMs = cycles.reduce((sum, trackedCycle) => sum + trackedCycle.elapsedMs, 0);
 	return (
 		theme.fg("success", formatRate(cycleTps(last))) +
 		theme.fg("dim", " · TTFT ") +
 		theme.fg("accent", formatDuration(last.ttftMs)) +
-		theme.fg("dim", ` · ${totalToolCalls(toolStats)} tools`)
+		theme.fg("dim", ` · ${totalToolCalls(toolStats)} tools · `) +
+		theme.fg("warning", `${formatDuration(totalElapsedMs)} total`)
 	);
 }
 
 export default function agentStatsExtension(pi: ExtensionAPI) {
 	let activeCycle: ActiveCycle | undefined;
-	let statusTimer: ReturnType<typeof setInterval> | undefined;
+	let liveTimer: ReturnType<typeof setInterval> | undefined;
 
 	function branchStats(ctx: ExtensionContext) {
 		const branch = ctx.sessionManager.getBranch();
@@ -401,27 +404,36 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 
 	function refreshStatus(ctx: ExtensionContext) {
 		if (activeCycle) {
-			ctx.ui.setStatus(STATUS_ID, statusText(ctx, activeCycle, [], new Map()));
+			ctx.ui.setStatus(STATUS_ID, undefined);
 			return;
 		}
 		const stats = branchStats(ctx);
-		ctx.ui.setStatus(STATUS_ID, statusText(ctx, undefined, stats.cycles, stats.tools));
+		ctx.ui.setStatus(STATUS_ID, statusText(ctx, stats.cycles, stats.tools));
 	}
 
-	function stopStatusTimer() {
-		if (statusTimer) clearInterval(statusTimer);
-		statusTimer = undefined;
+	function refreshWorkingMessage(ctx: ExtensionContext) {
+		if (!activeCycle || activeCycle.phase === "tools") return;
+		ctx.ui.setWorkingMessage(
+			`${phaseLabel(activeCycle.phase)} ${formatLiveCounter(now() - activeCycle.startedAt)}`,
+		);
 	}
 
-	function startStatusTimer(ctx: ExtensionContext) {
-		stopStatusTimer();
-		statusTimer = setInterval(() => refreshStatus(ctx), STATUS_REFRESH_MS);
-		statusTimer.unref?.();
+	function stopLiveTimer() {
+		if (liveTimer) clearInterval(liveTimer);
+		liveTimer = undefined;
+	}
+
+	function startLiveTimer(ctx: ExtensionContext) {
+		stopLiveTimer();
+		refreshWorkingMessage(ctx);
+		liveTimer = setInterval(() => refreshWorkingMessage(ctx), STATUS_REFRESH_MS);
+		liveTimer.unref?.();
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		activeCycle = undefined;
-		stopStatusTimer();
+		stopLiveTimer();
+		ctx.ui.setWorkingMessage();
 		ctx.ui.setStatus(LEGACY_STATUS_ID, undefined);
 		refreshStatus(ctx);
 	});
@@ -431,19 +443,21 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 			turnIndex: event.turnIndex,
 			startedAt: now(),
 			startedWallTime: Date.now(),
+			phase: "waiting",
 			providerAttempts: 0,
 			tools: [],
 			activeTools: new Map(),
 		};
 		refreshStatus(ctx);
-		startStatusTimer(ctx);
+		startLiveTimer(ctx);
 	});
 
 	pi.on("before_provider_request", async (_event, ctx) => {
 		if (!activeCycle || activeCycle.firstGeneratedAt !== undefined) return;
 		activeCycle.providerRequestAt = now();
 		activeCycle.providerAttempts++;
-		refreshStatus(ctx);
+		activeCycle.phase = "waiting";
+		refreshWorkingMessage(ctx);
 	});
 
 	pi.on("message_update", async (event, ctx) => {
@@ -458,19 +472,32 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 			)
 		) {
 			activeCycle.firstGeneratedAt = current;
-			phaseChanged = true;
 		}
+
+		if (streamEvent.type === "thinking_start" || streamEvent.type === "thinking_delta") {
+			phaseChanged = activeCycle.phase !== "thinking";
+			activeCycle.phase = "thinking";
+		} else if (streamEvent.type === "text_start" || streamEvent.type === "text_delta") {
+			phaseChanged = activeCycle.phase !== "responding";
+			activeCycle.phase = "responding";
+		} else if (
+			streamEvent.type === "toolcall_start" ||
+			streamEvent.type === "toolcall_delta" ||
+			streamEvent.type === "toolcall_end"
+		) {
+			phaseChanged = activeCycle.phase !== "preparing-tools";
+			activeCycle.phase = "preparing-tools";
+		}
+
 		if (streamEvent.type === "done" || streamEvent.type === "error") {
 			activeCycle.generationEndedAt = current;
-			phaseChanged = true;
 		}
-		if (phaseChanged) refreshStatus(ctx);
+		if (phaseChanged) refreshWorkingMessage(ctx);
 	});
 
-	pi.on("message_end", async (event, ctx) => {
+	pi.on("message_end", async (event, _ctx) => {
 		if (!activeCycle || event.message.role !== "assistant") return;
 		activeCycle.generationEndedAt ??= now();
-		refreshStatus(ctx);
 	});
 
 	pi.on("tool_execution_start", async (event, ctx) => {
@@ -481,10 +508,14 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 			startedAt,
 			startOffsetMs: startedAt - activeCycle.startedAt,
 		});
-		refreshStatus(ctx);
+		if (activeCycle.phase !== "tools") {
+			activeCycle.phase = "tools";
+			stopLiveTimer();
+			ctx.ui.setWorkingMessage();
+		}
 	});
 
-	pi.on("tool_execution_end", async (event, ctx) => {
+	pi.on("tool_execution_end", async (event, _ctx) => {
 		if (!activeCycle) return;
 		const tool = activeCycle.activeTools.get(event.toolCallId);
 		if (tool) {
@@ -498,7 +529,6 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 			});
 			activeCycle.activeTools.delete(event.toolCallId);
 		}
-		refreshStatus(ctx);
 	});
 
 	pi.on("turn_end", async (event, ctx) => {
@@ -550,13 +580,15 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 
 		pi.appendEntry(ENTRY_TYPE, persisted);
 		activeCycle = undefined;
-		stopStatusTimer();
+		stopLiveTimer();
+		ctx.ui.setWorkingMessage();
 		refreshStatus(ctx);
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		activeCycle = undefined;
-		stopStatusTimer();
+		stopLiveTimer();
+		ctx.ui.setWorkingMessage();
 	});
 
 	pi.registerCommand("agent-stats", {
