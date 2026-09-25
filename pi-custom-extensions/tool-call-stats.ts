@@ -19,6 +19,7 @@ const LEGACY_STATUS_ID = "tool-calls";
 const ENTRY_TYPE = "agent-stats-cycle";
 const ENTRY_VERSION = 1;
 const STATUS_REFRESH_MS = 250;
+const REASONING_EVENT = "reasoning-tokens:live";
 
 type GeneratedDeltaType = "text_delta" | "thinking_delta" | "toolcall_delta";
 
@@ -72,6 +73,7 @@ interface ActiveCycle {
 	providerAttempts: number;
 	tools: ToolTiming[];
 	activeTools: Map<string, ActiveTool>;
+	reasoningTokens?: number;
 }
 
 interface ToolTimingStat extends ToolStat {
@@ -194,6 +196,12 @@ function formatLiveCounter(ms: number): string {
 	return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 }
 
+function formatWholeDuration(ms: number): string {
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 60) return `${seconds}s`;
+	return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function phaseLabel(phase: Exclude<CyclePhase, "tools">): string {
 	switch (phase) {
 		case "waiting":
@@ -211,6 +219,12 @@ function formatTokens(tokens: number): string {
 	if (tokens < 1000) return `${tokens}`;
 	if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k`;
 	return `${(tokens / 1_000_000).toFixed(1)}M`;
+}
+
+function formatLiveTokens(tokens: number): string {
+	if (tokens < 1000) return `${tokens}`;
+	if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k`;
+	return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
 function percentage(part: number, whole: number): string {
@@ -386,7 +400,7 @@ function statusText(
 		theme.fg("dim", " · TTFT ") +
 		theme.fg("accent", formatDuration(last.ttftMs)) +
 		theme.fg("dim", ` · ${totalToolCalls(toolStats)} tools · `) +
-		theme.fg("warning", `${formatDuration(totalElapsedMs)} total`)
+		theme.fg("warning", `${formatWholeDuration(totalElapsedMs)} total`)
 	);
 }
 
@@ -413,8 +427,11 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 
 	function refreshWorkingMessage(ctx: ExtensionContext) {
 		if (!activeCycle || activeCycle.phase === "tools") return;
+		const reasoning = activeCycle.phase === "thinking" && activeCycle.reasoningTokens !== undefined
+			? ` · ↓${formatLiveTokens(activeCycle.reasoningTokens)}`
+			: "";
 		ctx.ui.setWorkingMessage(
-			`${phaseLabel(activeCycle.phase)} ${formatLiveCounter(now() - activeCycle.startedAt)}`,
+			`${phaseLabel(activeCycle.phase)} ${formatLiveCounter(now() - activeCycle.startedAt)}${reasoning}`,
 		);
 	}
 
@@ -429,6 +446,13 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
 		liveTimer = setInterval(() => refreshWorkingMessage(ctx), STATUS_REFRESH_MS);
 		liveTimer.unref?.();
 	}
+
+	pi.events.on(REASONING_EVENT, (data) => {
+		if (!activeCycle || !data || typeof data !== "object" || !("tokens" in data)) return;
+		const tokens = data.tokens;
+		if (typeof tokens !== "number" || !Number.isFinite(tokens)) return;
+		activeCycle.reasoningTokens = tokens;
+	});
 
 	pi.on("session_start", async (_event, ctx) => {
 		activeCycle = undefined;

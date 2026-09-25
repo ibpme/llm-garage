@@ -124,6 +124,10 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           if (cacheWrite)
             statParts.push(theme.fg("muted", `W${formatTokens(cacheWrite)}`));
 
+          const extensionStatuses = footerData.getExtensionStatuses();
+          const agentStats = extensionStatuses.get("agent-stats");
+          if (agentStats) statParts.push(sanitizeStatus(agentStats));
+
           const usingSubscription = ctx.model
             ? ctx.modelRegistry.isUsingOAuth(ctx.model)
             : false;
@@ -152,7 +156,8 @@ export default function statusLineExtension(pi: ExtensionAPI) {
             `${bar} ${theme.fg(color, percentText)}${theme.fg("dim", ` ${formatTokens(usedTokens)}/${formatTokens(contextWindow)}`)}`,
           );
 
-          const extensionStatuses = footerData.getExtensionStatuses();
+          const reasoningStatus = extensionStatuses.get("reasoning-tokens");
+          if (reasoningStatus) statParts.push(sanitizeStatus(reasoningStatus));
 
           // Prepended (in reverse) rather than appended so the width
           // truncation below eats the stats before it eats these badges.
@@ -198,7 +203,7 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           const lines = [line1, line2];
 
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
+            .filter(([key]) => key !== "reasoning-tokens" && key !== "agent-stats" && !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
           if (rest.length > 0) {
