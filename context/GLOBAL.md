@@ -12,10 +12,6 @@ Project-scoped config (a repo's own `CLAUDE.md`/`AGENTS.md`, or a
 skills/commands dir inside a repo), subagents, and MCP servers are
 non-canonical by design -- edit those directly, no restriction.
 
-Before touching global memory/skills/commands, use the `config-garage` skill
-to locate the repo and the canonical way to change it, then ask the user
-before editing the synced location.
-
 ## Python
 
 - Always use `uv` — never system Python or `pip` directly.
