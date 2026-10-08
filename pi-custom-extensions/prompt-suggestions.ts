@@ -30,21 +30,28 @@ const DEFAULT_CONFIG: SuggestionConfig = {
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const UNAVAILABLE_DISPLAY_MS = 3_000;
-const MAX_CONTEXT_CHARS = 16_000;
+const MAX_CONTEXT_CHARS = 24_000;
+const MAX_MESSAGE_CHARS = 4_000;
+const MAX_TOOL_RESULT_CHARS = 800;
+const MAX_TOOL_ARGS_CHARS = 300;
 const MAX_SUGGESTION_CHARS = 240;
-const MAX_RESPONSE_TOKENS = 256;
+// Reasoning models spend output tokens thinking before the visible reply; 256 often ended with no text.
+const MAX_RESPONSE_TOKENS = 2048;
 const NO_SUGGESTION = "NO_SUGGESTION";
 const SOFTWARE_CURSOR = "\x1b[7m \x1b[0m";
 
-const SUGGESTION_SYSTEM_PROMPT = `You suggest one useful next-step follow-up prompt for an ongoing conversation.
+const SUGGESTION_SYSTEM_PROMPT = `You predict the next message a user will type to a coding assistant.
 
 Rules:
-- Ground the suggestion in the conversation.
-- Prefer an actionable next step such as verification, testing, explanation, or refinement.
-- Return exactly one complete prompt as plain text.
-- Return one concise sentence, normally 10-30 words.
-- Do not use Markdown, quotes, labels, or explanations.
-- If there is no meaningful follow-up, return exactly ${NO_SUGGESTION}.`;
+- Write in the USER's voice, addressed to the assistant (e.g. "Run the tests and fix any failures."). Never write the assistant's reply or an offer such as "Would you like me to...".
+- Ground the message in the latest state of the conversation: what was just done, what failed, what is still open.
+- If the assistant asked the user a question, answer it the way the user most likely would.
+- If the assistant reported an error, ask to fix or investigate that specific error.
+- If the task looks complete, suggest a verification step (test, review, explain, or commit) rather than new work.
+- Be specific: name files, functions, errors, or commands from the conversation. Avoid generic phrases like "looks good" or "thanks".
+- Return exactly one message as plain text, one sentence, normally 8-30 words.
+- Do not use Markdown, quotes, bullets, labels, or explanations.
+- If there is no meaningful next message, return exactly ${NO_SUGGESTION}.`;
 
 type Phase = "idle" | "thinking" | "unavailable";
 
@@ -291,66 +298,158 @@ async function saveConfig(config: SuggestionConfig): Promise<void> {
   await writeFile(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
-function contextSections(ctx: ExtensionContext): string[] {
-  const sections: string[] = [];
+type TranscriptRole = "user" | "assistant" | "tool" | "summary";
+
+interface TranscriptSection {
+  role: TranscriptRole;
+  text: string;
+}
+
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = Math.floor(max * 0.7);
+  const tail = max - head;
+  const omitted = text.length - max;
+  return `${text.slice(0, head)}\n[...${omitted} chars omitted...]\n${text.slice(-tail)}`;
+}
+
+function summarizeArguments(args: unknown): string {
+  try {
+    return clip(JSON.stringify(args ?? {}), MAX_TOOL_ARGS_CHARS);
+  } catch {
+    return "{}";
+  }
+}
+
+function transcriptSections(ctx: ExtensionContext): TranscriptSection[] {
+  const sections: TranscriptSection[] = [];
 
   for (const entry of ctx.sessionManager.buildContextEntries()) {
     if (entry.type === "compaction") {
-      sections.push(`[COMPACTION SUMMARY]\n${entry.summary}`);
+      sections.push({ role: "summary", text: `[EARLIER SUMMARY]\n${entry.summary}` });
       continue;
     }
     if (entry.type === "branch_summary") {
-      sections.push(`[BRANCH SUMMARY]\n${entry.summary}`);
+      sections.push({ role: "summary", text: `[BRANCH SUMMARY]\n${entry.summary}` });
       continue;
     }
     if (entry.type !== "message") continue;
 
     const { message } = entry;
-    if (
-      message.role !== "user" &&
-      message.role !== "assistant" &&
-      message.role !== "toolResult"
-    ) {
+
+    if (message.role === "user") {
+      const text = extractTextParts(message.content).trim();
+      if (text) sections.push({ role: "user", text: clip(text, MAX_MESSAGE_CHARS) });
       continue;
     }
 
-    const text = extractTextParts(message.content).trim();
-    if (!text) continue;
+    if (message.role === "assistant") {
+      // Tool calls carry the actual work (edits, commands), so they must stay visible.
+      const parts: string[] = [];
+      for (const part of message.content) {
+        if (part.type === "text" && part.text.trim()) {
+          parts.push(clip(part.text.trim(), MAX_MESSAGE_CHARS));
+        } else if (part.type === "toolCall") {
+          parts.push(`[called ${part.name} ${summarizeArguments(part.arguments)}]`);
+        }
+      }
+      if (parts.length) sections.push({ role: "assistant", text: parts.join("\n") });
+      continue;
+    }
 
-    const role =
-      message.role === "toolResult"
-        ? "TOOL RESULT"
-        : message.role.toUpperCase();
-    sections.push(`[${role}]\n${text}`);
+    if (message.role === "toolResult") {
+      const text = extractTextParts(message.content).trim();
+      const status = message.isError ? " (error)" : "";
+      sections.push({
+        role: "tool",
+        text: `[tool ${message.toolName}${status}] ${clip(text || "(no output)", MAX_TOOL_RESULT_CHARS)}`,
+      });
+      continue;
+    }
+
+    if (message.role === "bashExecution" && !message.excludeFromContext) {
+      const output = clip(message.output.trim() || "(no output)", MAX_TOOL_RESULT_CHARS);
+      sections.push({
+        role: "tool",
+        text: `[user ran shell] $ ${message.command}\n${output}`,
+      });
+    }
   }
 
   return sections;
 }
 
-function serializeContext(ctx: ExtensionContext): string {
-  const sections = contextSections(ctx);
-  const full = sections.join("\n\n");
+/**
+ * Keeps the original request (first user message) and as much recent history
+ * as fits. Dropping the oldest turns is safe; dropping the goal is not.
+ */
+function serializeContext(sections: TranscriptSection[]): string {
+  const full = sections.map((section) => section.text).join("\n\n");
   if (full.length <= MAX_CONTEXT_CHARS) return full;
 
-  const note = "[Earlier context truncated]\n\n";
-  const budget = MAX_CONTEXT_CHARS - note.length;
-  const kept: string[] = [];
-  let length = 0;
+  const note = "[Earlier conversation truncated]";
+  const pinnedIndex = sections.findIndex((section) => section.role === "user");
+  const kept = new Set<number>();
+  let length = note.length;
 
-  for (let index = sections.length - 1; index >= 0; index--) {
-    const section = sections[index]!;
-    const separatorLength = kept.length ? 2 : 0;
-    if (length + separatorLength + section.length <= budget) {
-      kept.unshift(section);
-      length += separatorLength + section.length;
-      continue;
-    }
-
-    if (!kept.length) kept.push(section.slice(-budget));
-    break;
+  if (pinnedIndex >= 0) {
+    kept.add(pinnedIndex);
+    length += sections[pinnedIndex]!.text.length + 2;
   }
 
-  return note + kept.join("\n\n");
+  for (let index = sections.length - 1; index >= 0; index--) {
+    if (kept.has(index)) continue;
+    const cost = sections[index]!.text.length + 2;
+    if (length + cost > MAX_CONTEXT_CHARS) break;
+    kept.add(index);
+    length += cost;
+  }
+
+  const parts: string[] = [];
+  let skipped = false;
+  for (let index = 0; index < sections.length; index++) {
+    if (!kept.has(index)) {
+      skipped = true;
+      continue;
+    }
+    if (skipped && parts.length) parts.push("[...]");
+    skipped = false;
+    parts.push(sections[index]!.text);
+  }
+
+  return `${note}\n\n${parts.join("\n\n")}`;
+}
+
+function buildUserPrompt(transcript: string): string {
+  return `<conversation>
+${transcript}
+</conversation>
+
+Write the single message the USER would most likely send to the assistant next. Output only that message, or ${NO_SUGGESTION}.`;
+}
+
+/**
+ * Repairs harmless formatting noise (labels, bullets, wrapping quotes) instead
+ * of discarding an otherwise good suggestion.
+ */
+function cleanSuggestion(raw: string): string {
+  let text = raw.trim();
+  text = text.replace(/^```[a-z]*\s*|\s*```$/gi, "");
+  text = text.replace(
+    /^(?:suggested\s+(?:next\s+)?(?:prompt|message)|next\s+(?:prompt|message)|suggestion|prompt|message)\s*:\s*/i,
+    "",
+  );
+  text = text.replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, "");
+  text = text.replace(/\s+/g, " ").trim();
+
+  let previous: string;
+  do {
+    previous = text;
+    const pair = text.match(/^(["'`\u201c\u2018])(.*)(["'`\u201d\u2019])$/);
+    if (pair) text = pair[2]!.trim();
+  } while (text !== previous);
+
+  return text;
 }
 
 function validateSuggestion(
@@ -358,15 +457,20 @@ function validateSuggestion(
   previous: string | null,
 ): string | null {
   if (typeof raw !== "string") return null;
-  const suggestion = raw.trim();
+  const suggestion = cleanSuggestion(raw);
 
-  if (!suggestion || suggestion.toUpperCase() === NO_SUGGESTION) return null;
-  if (suggestion.length > MAX_SUGGESTION_CHARS || suggestion === previous)
+  if (!suggestion || suggestion.toUpperCase().includes(NO_SUGGESTION)) return null;
+  if (suggestion.length > MAX_SUGGESTION_CHARS || suggestion === previous) return null;
+  if (/[\x00-\x1f\x7f\u001b]/.test(suggestion)) return null;
+  if (/^suggest/i.test(suggestion) || /:\s*$/.test(suggestion)) return null;
+  // Assistant-voiced offers ("Would you like me to...") are not prompts the user would send.
+  if (
+    /^(?:would you like|do you want me|shall i|should i|let me know|i can|i'll|i will|i would)\b/i.test(
+      suggestion,
+    )
+  ) {
     return null;
-  if (/```|^suggestion\s*:/i.test(suggestion)) return null;
-  if (/^(?:[-*•]\s+|\d+[.)]\s+)/.test(suggestion)) return null;
-  if (/^(?:".*"|'.*'|`.*`)$/.test(suggestion)) return null;
-  if (/[\r\n\x00-\x1f\x7f\u001b]/.test(suggestion)) return null;
+  }
 
   return suggestion;
 }
@@ -452,6 +556,9 @@ async function requestSuggestion(
   if (response.stopReason === "error") {
     throw new Error(response.errorMessage ?? "Suggestion request failed");
   }
+  if (response.stopReason === "length") {
+    throw new Error("Suggestion model ran out of output tokens");
+  }
 
   return response.content
     .filter(
@@ -459,6 +566,20 @@ async function requestSuggestion(
     )
     .map((part) => part.text)
     .join("");
+}
+
+function endsWithCompletedAssistantTurn(ctx: ExtensionContext): boolean {
+  const last = ctx.sessionManager
+    .buildContextEntries()
+    .filter((entry) => entry.type === "message")
+    .at(-1);
+  if (!last || last.type !== "message") return false;
+  const { message } = last;
+  return (
+    message.role === "assistant" &&
+    message.stopReason !== "error" &&
+    message.stopReason !== "aborted"
+  );
 }
 
 function statusText(state: SuggestionViewState): string {
@@ -587,13 +708,16 @@ class PromptSuggestions {
       return;
     }
 
-    const context = serializeContext(ctx);
-    if (!context) return;
+    if (!endsWithCompletedAssistantTurn(ctx)) return;
+
+    const transcript = serializeContext(transcriptSections(ctx));
+    if (!transcript) return;
+    const prompt = buildUserPrompt(transcript);
 
     this.cancelRequest();
     const controller = new AbortController();
     const generation = this.generation;
-    const contextKey = ctx.sessionManager.getLeafId() ?? context;
+    const contextKey = ctx.sessionManager.getLeafId() ?? transcript;
     this.request = controller;
     this.patchState({ phase: "thinking", suggestion: null });
 
@@ -601,7 +725,7 @@ class PromptSuggestions {
     try {
       const raw = await requestSuggestion(
         this.config,
-        context,
+        prompt,
         controller.signal,
         ctx,
       );
