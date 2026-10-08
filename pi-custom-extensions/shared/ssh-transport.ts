@@ -1,7 +1,6 @@
 /**
  * SSH transport for ssh.ts: spawns `ssh`, enforces timeouts/abort, tracks
- * live children, and classifies failures. Deliberately free of pi imports so
- * it can be unit-tested with node:test.
+ * live children, and classifies failures.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync } from "node:fs";
