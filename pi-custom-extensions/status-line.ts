@@ -77,9 +77,21 @@ export default function statusLineExtension(pi: ExtensionAPI) {
     ctx.ui.setFooter((tui, theme, footerData) => {
       activeTui = tui;
       const unsub = footerData.onBranchChange(() => tui.requestRender());
+      let lastToolStatus = "";
+      // Background MCP connections do not expose a public registry-change
+      // event. Poll only the labels, and repaint only when they change.
+      const toolRefresh = setInterval(() => {
+        const current = JSON.stringify(toolStatuses(pi, theme));
+        if (current !== lastToolStatus) {
+          lastToolStatus = current;
+          tui.requestRender();
+        }
+      }, 1000);
+      toolRefresh.unref();
 
       return {
         dispose() {
+          clearInterval(toolRefresh);
           unsub();
           if (activeTui === tui) activeTui = undefined;
         },
@@ -216,6 +228,7 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           // Read the live registry: MCP servers connect asynchronously, and
           // tool_search can activate tools without a mode change.
           const tools = toolStatuses(pi, theme);
+          lastToolStatus = JSON.stringify(tools);
           const suggestionStatus = extensionStatuses.get("prompt-suggestions");
           const rest = Array.from(extensionStatuses.entries())
             .filter(([key]) => ![SSH_STATUS_KEY, "tools", "mcp-tools", "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
