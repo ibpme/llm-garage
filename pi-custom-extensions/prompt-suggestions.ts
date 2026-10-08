@@ -582,12 +582,15 @@ function endsWithCompletedAssistantTurn(ctx: ExtensionContext): boolean {
   );
 }
 
-function statusText(state: SuggestionViewState): string {
-  if (!state.enabled) return "suggestions: off";
-  if (state.phase === "thinking") return "suggestions: thinking…";
-  if (state.phase === "unavailable") return "suggestions: unavailable";
-  if (state.suggestion) return "suggestions: on · Tab accept · Esc dismiss";
-  return "suggestions: on";
+function statusText(state: SuggestionViewState, theme: ExtensionContext["ui"]["theme"]): string {
+  const prefix = theme.fg("dim", "suggestions:");
+  let body: string;
+  if (!state.enabled) body = "off";
+  else if (state.phase === "thinking") body = "thinking…";
+  else if (state.phase === "unavailable") body = "unavailable";
+  else if (state.suggestion) body = "on · Tab accept · Esc dismiss";
+  else body = "on";
+  return prefix + theme.fg("muted", ` ${body}`);
 }
 
 class PromptSuggestions {
@@ -660,7 +663,7 @@ class PromptSuggestions {
     Object.assign(this.state, patch);
     const ctx = this.activeContext;
     if (!ctx) return;
-    ctx.ui.setStatus(STATUS_ID, statusText(this.state));
+    ctx.ui.setStatus(STATUS_ID, statusText(this.state, ctx.ui.theme));
   }
 
   private clearUnavailableTimer(): void {
