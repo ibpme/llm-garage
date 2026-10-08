@@ -1,6 +1,6 @@
 /** Read-only `/tools` registry viewer. Exposure is distinct from active declarations. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ToolSet } from "./state.ts";
 import { groupTools, toolDisplayName, toolStatus } from "./viewer-model.ts";
 
@@ -35,24 +35,37 @@ export function registerViewer(pi: ExtensionAPI, toolSet: ToolSet) {
 						]);
 						pageSize = Math.max(1, tui.terminal.rows - 8);
 						offset = Math.min(offset, Math.max(0, rows.length - pageSize));
-						return [
+						const innerWidth = Math.max(1, width - 2);
+						const frame = (line: string) => {
+							const fitted = truncateToWidth(line, innerWidth, "", true);
+							return (
+								theme.fg("border", "│") +
+								fitted +
+								" ".repeat(Math.max(0, innerWidth - visibleWidth(fitted))) +
+								theme.fg("border", "│")
+							);
+						};
+						const content = [
 							theme.fg("accent", theme.bold("Tools")) +
 								theme.fg("dim", `  (${toolSet.getMode().toUpperCase()} mode — /safe /yolo to change)`),
 							"",
 							...rows.slice(offset, offset + pageSize),
 							"",
 							theme.fg("dim", "  Deferred: discover via tool_search or codemode · Loaded: active declaration"),
-							theme.fg("dim", "  Unregistered/disabled servers: /mcp · ↑/↓ PgUp/PgDn to scroll · Esc to close"),
-						].map((line) => truncateToWidth(line, width, "", true));
+							theme.fg("dim", "  Unregistered/disabled servers: /mcp · j/k to scroll · Esc to close"),
+						];
+						return [
+							theme.fg("border", `╭${"─".repeat(innerWidth)}╮`),
+							...content.map(frame),
+							theme.fg("border", `╰${"─".repeat(innerWidth)}╯`),
+						];
 					},
 					invalidate: () => {},
 					handleInput(data: string) {
 						if (matchesKey(data, "escape") || data === "q" || data === "h") done(undefined);
 						else {
-							if (matchesKey(data, "up")) offset--;
-							else if (matchesKey(data, "down")) offset++;
-							else if (matchesKey(data, "pageUp")) offset -= pageSize;
-							else if (matchesKey(data, "pageDown")) offset += pageSize;
+							if (data === "k" || matchesKey(data, "up")) offset--;
+							else if (data === "j" || matchesKey(data, "down")) offset++;
 							offset = Math.max(0, Math.min(offset, Math.max(0, totalRows - pageSize)));
 							tui.requestRender();
 						}
