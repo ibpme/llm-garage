@@ -72,7 +72,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import {
   type BashOperations,
   type EditOperations,
@@ -138,6 +138,17 @@ function sshExec(remote: string, command: string): Promise<Buffer> {
 interface SshTarget {
   remote: string;
   remoteCwd: string;
+}
+
+/** Footer badge for the "ssh" status key; status-line.ts places it on the cwd line. */
+function sshStatusText(theme: Theme, label: string, target: SshTarget): string {
+  return (
+    theme.fg("warning", theme.bold(`⇄ ${label}`)) +
+    theme.fg("dim", " ") +
+    theme.fg("accent", target.remote) +
+    theme.fg("dim", ":") +
+    theme.fg("success", target.remoteCwd)
+  );
 }
 
 async function resolveSshArg(arg: string): Promise<SshTarget> {
@@ -441,7 +452,7 @@ export default function (pi: ExtensionAPI) {
       for (const name of SAFE_ONLY_REMOTE_TOOL_NAMES) selection.add(name);
     }
     toolSet.setSelection([...selection]);
-    ctx.ui.setStatus("ssh", `SSH session: ${sessionSsh!.remote}:${sessionSsh!.remoteCwd}`);
+    ctx.ui.setStatus("ssh", sshStatusText(ctx.ui.theme as Theme, "SSH", sessionSsh!));
     lastStatusCtx = ctx;
     updateRemoteToolsStatus();
   }
@@ -526,7 +537,7 @@ export default function (pi: ExtensionAPI) {
       find: createRemoteFindOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
       tag: cliSsh.remote,
     });
-    ctx.ui.setStatus("ssh", ctx.ui.theme.fg("accent", `SSH: ${cliSsh.remote}:${cliSsh.remoteCwd}`));
+    ctx.ui.setStatus("ssh", sshStatusText(ctx.ui.theme as Theme, "SSH", cliSsh));
     ctx.ui.notify(
       `SSH override mode: ${cliSsh.remote}:${cliSsh.remoteCwd} (read/write/edit/bash/grep/ls/find run remotely)`,
       "info",

@@ -17,7 +17,9 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 const BAR_WIDTH = 10;
 
 /** Extension statuses hoisted onto line 2 instead of the trailing status line. */
-const INLINE_STATUS_KEYS = ["mode", "ssh"] as const;
+const INLINE_STATUS_KEYS = ["mode"] as const;
+/** Shown on line 1 right after the local cwd/branch. */
+const SSH_STATUS_KEY = "ssh";
 
 function sanitizeStatus(text: string): string {
   return text
@@ -103,10 +105,15 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           const branch = footerData.getGitBranch();
           const sessionName = ctx.sessionManager.getSessionName();
 
+          const extensionStatuses = footerData.getExtensionStatuses();
           let line1 = theme.fg("accent", theme.bold(pwd));
           if (branch) {
             line1 +=
               theme.fg("dim", " on ") + theme.fg("success", `⎇ ${branch}`);
+          }
+          const sshStatus = extensionStatuses.get(SSH_STATUS_KEY);
+          if (sshStatus) {
+            line1 += theme.fg("dim", " · ") + sanitizeStatus(sshStatus);
           }
           if (sessionName) {
             line1 += theme.fg("dim", " • ") + theme.fg("muted", sessionName);
@@ -124,7 +131,6 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           if (cacheWrite)
             statParts.push(theme.fg("muted", `W${formatTokens(cacheWrite)}`));
 
-          const extensionStatuses = footerData.getExtensionStatuses();
           const agentStats = extensionStatuses.get("agent-stats");
           if (agentStats) statParts.push(sanitizeStatus(agentStats));
 
@@ -207,7 +213,7 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const suggestionStatus = extensionStatuses.get("prompt-suggestions");
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => key !== "reasoning-tokens" && key !== "agent-stats" && key !== "prompt-suggestions" && !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
+            .filter(([key]) => ![SSH_STATUS_KEY, "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
           if (rest.length > 0 || suggestionStatus) {
