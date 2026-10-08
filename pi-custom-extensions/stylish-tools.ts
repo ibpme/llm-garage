@@ -370,6 +370,8 @@ export interface StylishToolOptions<Ops> {
   name?: string;
   /** Placed before the built-in description so alternate tool destinations are immediately visible to the LLM. */
   extraDescription?: string;
+  /** Override the short system-prompt tool summary (used by bash). */
+  promptSnippet?: string;
   /** Dynamic operations source. Defaults to the shared operationsOverride registry. */
   getOperations?: () => Ops | undefined;
   /** Dynamic short tag shown next to the label/status when operations are overridden. */
@@ -398,7 +400,7 @@ export function createStylishBashTool(
     name: opts.name ?? "bash",
     label: metadata.label,
     description: opts.extraDescription ? `${opts.extraDescription}\n\n${metadata.description}` : metadata.description,
-    promptSnippet: metadata.promptSnippet,
+    promptSnippet: opts.promptSnippet ?? metadata.promptSnippet,
     promptGuidelines: metadata.promptGuidelines,
     parameters: metadata.parameters,
     renderShell: "self",

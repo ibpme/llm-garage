@@ -318,6 +318,7 @@ export default function (pi: ExtensionAPI) {
     createStylishBashTool(localCwd, timers, {
       name: "bash_remote",
       extraDescription: REMOTE_DESCRIPTIONS.bash,
+      promptSnippet: "Execute bash commands on the SSH remote host connected via /ssh (not the local machine)",
       getOperations: () => (sessionSsh ? createRemoteBashOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,

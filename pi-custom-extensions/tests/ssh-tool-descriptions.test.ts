@@ -5,10 +5,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import sshExtension from "../ssh.ts";
 
 test("remote tool descriptions identify their action and destination before local defaults", () => {
-  const tools: Array<{ name: string; description: string }> = [];
+  const tools: Array<{ name: string; description: string; promptSnippet?: string }> = [];
   const pi = {
     registerFlag() {},
-    registerTool(tool: { name: string; description: string }) { tools.push(tool); },
+    registerTool(tool: { name: string; description: string; promptSnippet?: string }) { tools.push(tool); },
     registerCommand() {},
     on() {},
   } as unknown as ExtensionAPI;
@@ -25,4 +25,7 @@ test("remote tool descriptions identify their action and destination before loca
   assert.match(read, /^Read a file on the SSH remote host/);
   assert.ok(bash.endsWith(createBashToolDefinition(process.cwd()).description));
   assert.ok(read.endsWith(createReadTool(process.cwd()).description));
+  const bashSnippet = tools.find((tool) => tool.name === "bash_remote")!.promptSnippet;
+  assert.match(bashSnippet!, /Execute bash commands on the SSH remote host/);
+  assert.notEqual(bashSnippet, createBashToolDefinition(process.cwd()).promptSnippet);
 });
