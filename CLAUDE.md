@@ -16,9 +16,7 @@ be treated as authoritative alongside this file.
 
 ```
 ./sync/sync-all.sh              # regenerate + symlink skills, memory, commands/prompts, subagents into all 4 tools
-./sync/sync-all.sh --with-mcp   # ...plus merge MCP servers under mcp/ into each tool's native config
 ./sync/unsync-all.sh            # remove all symlinks this repo created, restore backups
-./sync/unsync-all.sh --with-mcp # ...plus remove this repo's MCP entries from native configs
 ./sync/refresh-context7.py      # pull Context7's skill/rule content from upstream and diff
 ```
 
