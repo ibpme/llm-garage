@@ -114,7 +114,15 @@ const REMOTE_TOOL_NAMES = [
   ...SAFE_BLOCKED_REMOTE_TOOL_NAMES,
   ...SAFE_ONLY_REMOTE_TOOL_NAMES,
 ];
-const REMOTE_DESCRIPTION = "Executes on the SSH remote host connected via the /ssh command, not the local machine.";
+const REMOTE_DESCRIPTIONS = {
+  read: "Read a file on the SSH remote host connected via /ssh, not the local machine.",
+  write: "Write a file on the SSH remote host connected via /ssh, not the local machine.",
+  edit: "Edit a file on the SSH remote host connected via /ssh, not the local machine.",
+  bash: "Execute a shell command on the SSH remote host connected via /ssh, not the local machine.",
+  grep: "Search file contents on the SSH remote host connected via /ssh, not the local machine.",
+  ls: "List a directory on the SSH remote host connected via /ssh, not the local machine.",
+  find: "Find files on the SSH remote host connected via /ssh, not the local machine.",
+} as const;
 const NOT_CONNECTED_ERROR = "Not connected. Ask the user to run /ssh user@host first.";
 
 /** Footer badge for the "ssh" status key; status-line.ts places it on the cwd line. */
@@ -282,7 +290,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishReadTool(localCwd, timers, {
       name: "read_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.read,
       getOperations: () => (sessionSsh ? createRemoteReadOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -291,7 +299,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishWriteTool(localCwd, timers, {
       name: "write_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.write,
       getOperations: () => (sessionSsh ? createRemoteWriteOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -300,7 +308,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishEditTool(localCwd, timers, {
       name: "edit_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.edit,
       getOperations: () => (sessionSsh ? createRemoteEditOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -309,7 +317,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishBashTool(localCwd, timers, {
       name: "bash_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.bash,
       getOperations: () => (sessionSsh ? createRemoteBashOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -318,7 +326,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishGrepTool(localCwd, timers, {
       name: "grep_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.grep,
       getOperations: () => (sessionSsh ? createRemoteGrepOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -327,7 +335,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishLsTool(localCwd, timers, {
       name: "ls_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.ls,
       getOperations: () => (sessionSsh ? createRemoteLsOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
@@ -336,7 +344,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(
     createStylishFindTool(localCwd, timers, {
       name: "find_remote",
-      extraDescription: REMOTE_DESCRIPTION,
+      extraDescription: REMOTE_DESCRIPTIONS.find,
       getOperations: () => (sessionSsh ? createRemoteFindOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,

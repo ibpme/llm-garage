@@ -368,7 +368,7 @@ export function getOperationsOverride(): OperationsOverride {
 export interface StylishToolOptions<Ops> {
   /** Tool name as seen by the LLM. Defaults to the built-in's own name. */
   name?: string;
-  /** Appended to the description shown to the LLM. */
+  /** Placed before the built-in description so alternate tool destinations are immediately visible to the LLM. */
   extraDescription?: string;
   /** Dynamic operations source. Defaults to the shared operationsOverride registry. */
   getOperations?: () => Ops | undefined;
@@ -397,7 +397,7 @@ export function createStylishBashTool(
   return defineTool({
     name: opts.name ?? "bash",
     label: metadata.label,
-    description: opts.extraDescription ? `${metadata.description}\n\n${opts.extraDescription}` : metadata.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${metadata.description}` : metadata.description,
     promptSnippet: metadata.promptSnippet,
     promptGuidelines: metadata.promptGuidelines,
     parameters: metadata.parameters,
@@ -459,7 +459,7 @@ export function createStylishReadTool(cwd: string, timers: Set<NodeJS.Timeout>, 
   return defineTool({
     name: opts.name ?? "read",
     label: "read",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
@@ -535,7 +535,7 @@ export function createStylishEditTool(cwd: string, timers: Set<NodeJS.Timeout>, 
   return defineTool({
     name: opts.name ?? "edit",
     label: "edit",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
@@ -612,7 +612,7 @@ export function createStylishWriteTool(cwd: string, timers: Set<NodeJS.Timeout>,
   return defineTool({
     name: opts.name ?? "write",
     label: "write",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
@@ -674,7 +674,7 @@ export function createStylishGrepTool(cwd: string, timers: Set<NodeJS.Timeout>, 
   return defineTool({
     name: opts.name ?? "grep",
     label: "grep",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
@@ -736,7 +736,7 @@ export function createStylishLsTool(cwd: string, timers: Set<NodeJS.Timeout>, op
   return defineTool({
     name: opts.name ?? "ls",
     label: "ls",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
@@ -793,7 +793,7 @@ export function createStylishFindTool(cwd: string, timers: Set<NodeJS.Timeout>, 
   return defineTool({
     name: opts.name ?? "find",
     label: "find",
-    description: opts.extraDescription ? `${localTool.description}\n\n${opts.extraDescription}` : localTool.description,
+    description: opts.extraDescription ? `${opts.extraDescription}\n\n${localTool.description}` : localTool.description,
     parameters: localTool.parameters,
     renderShell: "self",
 
