@@ -1,0 +1,25 @@
+{
+    "mcpServers": {
+        "exa": {
+            "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa",
+            "exposure": "direct",
+            "headers": {
+                "x-api-key": "${EXA_API_KEY}"
+            }
+        },
+        "exa-agent-run": {
+            "url": "https://mcp.exa.ai/mcp?tools=agent_run",
+            "exposure": "deferred",
+            "headers": {
+                "x-api-key": "${EXA_API_KEY}"
+            }
+        },
+        "context7": {
+            "url": "https://mcp.context7.com/mcp",
+            "headers": {
+                "Authorization": "Bearer ${CONTEXT7_API_KEY}"
+            },
+            "exposure": "direct"
+        }
+    }
+}
