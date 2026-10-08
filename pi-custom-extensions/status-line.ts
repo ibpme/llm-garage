@@ -14,6 +14,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
+import { toolStatuses } from "./shared/tool-status.ts";
+
 const BAR_WIDTH = 10;
 
 /** Extension statuses hoisted onto line 2 instead of the trailing status line. */
@@ -211,13 +213,16 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const lines = [line1, line2];
 
+          // Read the live registry: MCP servers connect asynchronously, and
+          // tool_search can activate tools without a mode change.
+          const tools = toolStatuses(pi, theme);
           const suggestionStatus = extensionStatuses.get("prompt-suggestions");
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => ![SSH_STATUS_KEY, "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
+            .filter(([key]) => ![SSH_STATUS_KEY, "tools", "mcp-tools", "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
-          if (rest.length > 0 || suggestionStatus) {
-            const left = rest.join(theme.fg("dim", " · "));
+          {
+            const left = [tools.tools, ...(tools.mcp ? [tools.mcp] : []), ...rest].join(theme.fg("dim", " · "));
             const right = suggestionStatus ? sanitizeStatus(suggestionStatus) : "";
             const leftWidth = visibleWidth(left);
             const rightWidth = visibleWidth(right);

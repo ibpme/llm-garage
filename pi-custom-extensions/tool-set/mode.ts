@@ -10,6 +10,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { Mode, ToolSet } from "./state.ts";
+import { toolStatuses } from "../shared/tool-status.ts";
 
 /**
  * Published as two entries so a custom footer can place the badge on its own
@@ -18,7 +19,7 @@ import type { Mode, ToolSet } from "./state.ts";
  */
 const MODE_STATUS_ID = "mode";
 const TOOLS_STATUS_ID = "tools";
-const MAX_TOOLS_SHOWN = 6;
+const MCP_STATUS_ID = "mcp-tools";
 
 const MODE_COMMANDS: { name: string; description: string; mode: Mode }[] = [
 	{
@@ -48,33 +49,6 @@ function modeLabel(toolSet: ToolSet, ctx: ExtensionContext): string {
 	return badge + theme.fg("dim", " (shift+tab)");
 }
 
-function toolsLabel(pi: ExtensionAPI, ctx: ExtensionContext): string {
-	const { theme } = ctx.ui;
-	const prefix = theme.fg("dim", "tools:");
-	const active = pi.getActiveTools();
-	if (active.length === 0) return prefix + theme.fg("dim", "none");
-
-	// Pi builtins first (in their original order), then everything else
-	// (extension/SDK-registered tools), so the always-present core tools
-	// aren't pushed out of view by the "+N" overflow when the list is long.
-	const builtinNames = new Set(
-		pi
-			.getAllTools()
-			.filter((tool) => tool.sourceInfo.source === "builtin")
-			.map((tool) => tool.name),
-	);
-	const tools = [
-		...active.filter((name) => builtinNames.has(name)),
-		...active.filter((name) => !builtinNames.has(name)),
-	];
-
-	let text = prefix + theme.fg("muted", tools.slice(0, MAX_TOOLS_SHOWN).join(", "));
-	if (tools.length > MAX_TOOLS_SHOWN) {
-		text += theme.fg("dim", `, +${tools.length - MAX_TOOLS_SHOWN}`);
-	}
-	return text;
-}
-
 export function registerMode(pi: ExtensionAPI, toolSet: ToolSet) {
 	/**
 	 * `ctx` is only available inside handlers, so the status can only be
@@ -86,7 +60,9 @@ export function registerMode(pi: ExtensionAPI, toolSet: ToolSet) {
 	function applyStatus(ctx: ExtensionContext) {
 		lastCtx = ctx;
 		ctx.ui.setStatus(MODE_STATUS_ID, modeLabel(toolSet, ctx));
-		ctx.ui.setStatus(TOOLS_STATUS_ID, toolsLabel(pi, ctx));
+		const statuses = toolStatuses(pi, ctx.ui.theme);
+		ctx.ui.setStatus(TOOLS_STATUS_ID, statuses.tools);
+		ctx.ui.setStatus(MCP_STATUS_ID, statuses.mcp);
 	}
 
 	toolSet.onChange(() => {
