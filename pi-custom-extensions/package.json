@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"tests/**/*.test.ts\""
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "latest",

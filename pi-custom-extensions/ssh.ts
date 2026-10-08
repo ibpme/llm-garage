@@ -68,7 +68,6 @@
  *   /ssh off                        (disconnect the session-mode tools)
  */
 
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -94,6 +93,7 @@ import {
   setOperationsOverride,
 } from "./stylish-tools.ts";
 import { getToolSet } from "./tool-set/index.ts";
+import { globToRegExp, parseSshTarget, shq, SshConnection } from "./shared/ssh-transport.ts";
 
 // read_remote behaves like read: always selectable once connected, in
 // either mode.
@@ -117,31 +117,8 @@ const REMOTE_TOOL_NAMES = [
 const REMOTE_DESCRIPTION = "Executes on the SSH remote host connected via the /ssh command, not the local machine.";
 const NOT_CONNECTED_ERROR = "Not connected. Ask the user to run /ssh user@host first.";
 
-function sshExec(remote: string, command: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("ssh", [remote, command], { stdio: ["ignore", "pipe", "pipe"] });
-    const chunks: Buffer[] = [];
-    const errChunks: Buffer[] = [];
-    child.stdout.on("data", (data) => chunks.push(data));
-    child.stderr.on("data", (data) => errChunks.push(data));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`SSH failed (${code}): ${Buffer.concat(errChunks).toString()}`));
-      } else {
-        resolve(Buffer.concat(chunks));
-      }
-    });
-  });
-}
-
-interface SshTarget {
-  remote: string;
-  remoteCwd: string;
-}
-
 /** Footer badge for the "ssh" status key; status-line.ts places it on the cwd line. */
-function sshStatusText(theme: Theme, label: string, target: SshTarget): string {
+function sshStatusText(theme: Theme, label: string, target: Pick<SshConnection, "remote" | "remoteCwd">): string {
   return (
     theme.fg("warning", theme.bold(`⇄ ${label}`)) +
     theme.fg("dim", " ") +
@@ -151,14 +128,12 @@ function sshStatusText(theme: Theme, label: string, target: SshTarget): string {
   );
 }
 
-async function resolveSshArg(arg: string): Promise<SshTarget> {
-  const idx = arg.indexOf(":");
-  if (idx === -1) {
-    const remote = arg;
-    const pwd = (await sshExec(remote, "pwd")).toString().trim();
-    return { remote, remoteCwd: pwd };
-  }
-  return { remote: arg.slice(0, idx), remoteCwd: arg.slice(idx + 1) };
+/** Opens a connection. Without an explicit path, the remote cwd is the login directory. */
+async function connectSsh(arg: string): Promise<SshConnection> {
+  const { remote, remoteCwd } = parseSshTarget(arg);
+  if (remoteCwd !== undefined) return new SshConnection(remote, remoteCwd);
+  const home = (await new SshConnection(remote, "").exec("pwd")).toString().trim();
+  return new SshConnection(remote, home);
 }
 
 /** `Host` aliases from ~/.ssh/config, for /ssh argument hints. Wildcards excluded. */
@@ -179,14 +154,14 @@ function listSshConfigHosts(): string[] {
   }
 }
 
-function createRemoteReadOps(remote: string, remoteCwd: string, localCwd: string): ReadOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteReadOps(conn: SshConnection, localCwd: string): ReadOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
-    readFile: (p) => sshExec(remote, `cat ${JSON.stringify(toRemote(p))}`),
-    access: (p) => sshExec(remote, `test -r ${JSON.stringify(toRemote(p))}`).then(() => {}),
+    readFile: (p) => conn.exec(`cat ${JSON.stringify(toRemote(p))}`),
+    access: (p) => conn.exec(`test -r ${JSON.stringify(toRemote(p))}`).then(() => {}),
     detectImageMimeType: async (p) => {
       try {
-        const r = await sshExec(remote, `file --mime-type -b ${JSON.stringify(toRemote(p))}`);
+        const r = await conn.exec(`file --mime-type -b ${JSON.stringify(toRemote(p))}`);
         const m = r.toString().trim();
         return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(m) ? m : null;
       } catch {
@@ -196,114 +171,71 @@ function createRemoteReadOps(remote: string, remoteCwd: string, localCwd: string
   };
 }
 
-function createRemoteWriteOps(remote: string, remoteCwd: string, localCwd: string): WriteOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteWriteOps(conn: SshConnection, localCwd: string): WriteOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
     writeFile: async (p, content) => {
       const b64 = Buffer.from(content).toString("base64");
-      await sshExec(remote, `echo ${JSON.stringify(b64)} | base64 -d > ${JSON.stringify(toRemote(p))}`);
+      await conn.exec(`echo ${JSON.stringify(b64)} | base64 -d > ${JSON.stringify(toRemote(p))}`);
     },
-    mkdir: (dir) => sshExec(remote, `mkdir -p ${JSON.stringify(toRemote(dir))}`).then(() => {}),
+    mkdir: (dir) => conn.exec(`mkdir -p ${JSON.stringify(toRemote(dir))}`).then(() => {}),
   };
 }
 
-function createRemoteEditOps(remote: string, remoteCwd: string, localCwd: string): EditOperations {
-  const r = createRemoteReadOps(remote, remoteCwd, localCwd);
-  const w = createRemoteWriteOps(remote, remoteCwd, localCwd);
+function createRemoteEditOps(conn: SshConnection, localCwd: string): EditOperations {
+  const r = createRemoteReadOps(conn, localCwd);
+  const w = createRemoteWriteOps(conn, localCwd);
   return { readFile: r.readFile, access: r.access, writeFile: w.writeFile };
 }
 
-function createRemoteBashOps(remote: string, remoteCwd: string, localCwd: string): BashOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteBashOps(conn: SshConnection, localCwd: string): BashOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
-    exec: (command, cwd, { onData, signal, timeout }) =>
-      new Promise((resolve, reject) => {
-        const cmd = `cd ${JSON.stringify(toRemote(cwd))} && ${command}`;
-        const child = spawn("ssh", [remote, cmd], { stdio: ["ignore", "pipe", "pipe"] });
-        let timedOut = false;
-        const timer = timeout
-          ? setTimeout(() => {
-              timedOut = true;
-              child.kill();
-            }, timeout * 1000)
-          : undefined;
-        child.stdout.on("data", onData);
-        child.stderr.on("data", onData);
-        child.on("error", (e) => {
-          if (timer) clearTimeout(timer);
-          reject(e);
-        });
-        const onAbort = () => child.kill();
-        signal?.addEventListener("abort", onAbort, { once: true });
-        child.on("close", (code) => {
-          if (timer) clearTimeout(timer);
-          signal?.removeEventListener("abort", onAbort);
-          if (signal?.aborted) reject(new Error("aborted"));
-          else if (timedOut) reject(new Error(`timeout:${timeout}`));
-          else resolve({ exitCode: code });
-        });
-      }),
+    exec: async (command, cwd, { onData, signal, timeout }) => {
+      const result = await conn.run(`cd ${shq(toRemote(cwd))} && ${command}`, {
+        onData,
+        signal,
+        timeoutMs: timeout ? timeout * 1000 : undefined,
+      });
+      return { exitCode: result.code };
+    },
   };
 }
 
 /** "MISSING" | "DIR" | "FILE" for a remote path, shared by grep/ls's isDirectory/stat. */
-async function remoteStatKind(remote: string, absolutePath: string): Promise<"MISSING" | "DIR" | "FILE"> {
+async function remoteStatKind(conn: SshConnection, absolutePath: string): Promise<"MISSING" | "DIR" | "FILE"> {
   const quoted = JSON.stringify(absolutePath);
-  const out = await sshExec(
-    remote,
-    `if [ ! -e ${quoted} ]; then echo MISSING; elif [ -d ${quoted} ]; then echo DIR; else echo FILE; fi`,
+  const out = await conn.exec(`if [ ! -e ${quoted} ]; then echo MISSING; elif [ -d ${quoted} ]; then echo DIR; else echo FILE; fi`,
   );
   return out.toString().trim() as "MISSING" | "DIR" | "FILE";
 }
 
-function createRemoteGrepOps(remote: string, remoteCwd: string, localCwd: string): GrepOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteGrepOps(conn: SshConnection, localCwd: string): GrepOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
     isDirectory: async (p) => {
-      const kind = await remoteStatKind(remote, toRemote(p));
+      const kind = await remoteStatKind(conn, toRemote(p));
       if (kind === "MISSING") throw new Error(`No such file or directory: ${p}`);
       return kind === "DIR";
     },
-    readFile: async (p) => (await sshExec(remote, `cat ${JSON.stringify(toRemote(p))}`)).toString(),
+    readFile: async (p) => (await conn.exec(`cat ${JSON.stringify(toRemote(p))}`)).toString(),
   };
 }
 
-function createRemoteLsOps(remote: string, remoteCwd: string, localCwd: string): LsOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteLsOps(conn: SshConnection, localCwd: string): LsOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
-    exists: async (p) => (await remoteStatKind(remote, toRemote(p))) !== "MISSING",
+    exists: async (p) => (await remoteStatKind(conn, toRemote(p))) !== "MISSING",
     stat: async (p) => {
-      const kind = await remoteStatKind(remote, toRemote(p));
+      const kind = await remoteStatKind(conn, toRemote(p));
       if (kind === "MISSING") throw new Error(`No such file or directory: ${p}`);
       return { isDirectory: () => kind === "DIR" };
     },
     readdir: async (p) => {
-      const out = await sshExec(remote, `ls -A ${JSON.stringify(toRemote(p))}`);
+      const out = await conn.exec(`ls -A ${JSON.stringify(toRemote(p))}`);
       return out.toString().split("\n").filter(Boolean);
     },
   };
-}
-
-/** Minimal glob→RegExp: `**` matches across path segments, `*` within one, `?` any single char. */
-function globToRegExp(pattern: string): RegExp {
-  let re = "";
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === "*" && pattern[i + 1] === "*") {
-      re += ".*";
-      i++;
-      if (pattern[i + 1] === "/") i++;
-    } else if (c === "*") {
-      re += "[^/]*";
-    } else if (c === "?") {
-      re += "[^/]";
-    } else if (".+^$()[]{}|\\".includes(c)) {
-      re += `\\${c}`;
-    } else {
-      re += c;
-    }
-  }
-  return new RegExp(`^${re}$`);
 }
 
 /**
@@ -312,16 +244,14 @@ function globToRegExp(pattern: string): RegExp {
  * this does not respect .gitignore — the remote host may not have fd/rg
  * available, and shelling out per-.gitignore-rule isn't worth it here.
  */
-function createRemoteFindOps(remote: string, remoteCwd: string, localCwd: string): FindOperations {
-  const toRemote = (p: string) => p.replace(localCwd, remoteCwd);
+function createRemoteFindOps(conn: SshConnection, localCwd: string): FindOperations {
+  const toRemote = (p: string) => p.replace(localCwd, conn.remoteCwd);
   return {
-    exists: async (p) => (await remoteStatKind(remote, toRemote(p))) !== "MISSING",
+    exists: async (p) => (await remoteStatKind(conn, toRemote(p))) !== "MISSING",
     glob: async (pattern, cwd, { ignore, limit }) => {
       const remoteSearchCwd = toRemote(cwd);
       const prune = ignore.map((name) => `-name ${JSON.stringify(name)} -prune -o`).join(" ");
-      const out = await sshExec(
-        remote,
-        `find ${JSON.stringify(remoteSearchCwd)} ${prune} -type f -print 2>/dev/null`,
+      const out = await conn.exec(`find ${JSON.stringify(remoteSearchCwd)} ${prune} -type f -print 2>/dev/null`,
       );
       const re = globToRegExp(pattern);
       const matches: string[] = [];
@@ -344,16 +274,16 @@ export default function (pi: ExtensionAPI) {
 
   // CLI override mode — resolved once at session_start, redirects the base
   // read/write/edit/bash tools via stylish-tools.ts's override registry.
-  let cliSsh: SshTarget | null = null;
+  let cliSsh: SshConnection | null = null;
 
   // Interactive session mode — mutated by /ssh, drives the _remote tools.
-  let sessionSsh: SshTarget | null = null;
+  let sessionSsh: SshConnection | null = null;
 
   pi.registerTool(
     createStylishReadTool(localCwd, timers, {
       name: "read_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteReadOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteReadOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -362,7 +292,7 @@ export default function (pi: ExtensionAPI) {
     createStylishWriteTool(localCwd, timers, {
       name: "write_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteWriteOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteWriteOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -371,7 +301,7 @@ export default function (pi: ExtensionAPI) {
     createStylishEditTool(localCwd, timers, {
       name: "edit_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteEditOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteEditOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -380,7 +310,7 @@ export default function (pi: ExtensionAPI) {
     createStylishBashTool(localCwd, timers, {
       name: "bash_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteBashOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteBashOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -389,7 +319,7 @@ export default function (pi: ExtensionAPI) {
     createStylishGrepTool(localCwd, timers, {
       name: "grep_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteGrepOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteGrepOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -398,7 +328,7 @@ export default function (pi: ExtensionAPI) {
     createStylishLsTool(localCwd, timers, {
       name: "ls_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteLsOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteLsOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -407,7 +337,7 @@ export default function (pi: ExtensionAPI) {
     createStylishFindTool(localCwd, timers, {
       name: "find_remote",
       extraDescription: REMOTE_DESCRIPTION,
-      getOperations: () => (sessionSsh ? createRemoteFindOps(sessionSsh.remote, sessionSsh.remoteCwd, localCwd) : undefined),
+      getOperations: () => (sessionSsh ? createRemoteFindOps(sessionSsh, localCwd) : undefined),
       getTag: () => sessionSsh?.remote,
       requireOperationsError: NOT_CONNECTED_ERROR,
     }),
@@ -526,15 +456,15 @@ export default function (pi: ExtensionAPI) {
     const arg = pi.getFlag("ssh") as string | undefined;
     if (!arg) return;
 
-    cliSsh = await resolveSshArg(arg);
+    cliSsh = await connectSsh(arg);
     setOperationsOverride({
-      read: createRemoteReadOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      write: createRemoteWriteOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      edit: createRemoteEditOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      bash: createRemoteBashOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      grep: createRemoteGrepOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      ls: createRemoteLsOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
-      find: createRemoteFindOps(cliSsh.remote, cliSsh.remoteCwd, localCwd),
+      read: createRemoteReadOps(cliSsh, localCwd),
+      write: createRemoteWriteOps(cliSsh, localCwd),
+      edit: createRemoteEditOps(cliSsh, localCwd),
+      bash: createRemoteBashOps(cliSsh, localCwd),
+      grep: createRemoteGrepOps(cliSsh, localCwd),
+      ls: createRemoteLsOps(cliSsh, localCwd),
+      find: createRemoteFindOps(cliSsh, localCwd),
       tag: cliSsh.remote,
     });
     ctx.ui.setStatus("ssh", sshStatusText(ctx.ui.theme as Theme, "SSH", cliSsh));
@@ -579,18 +509,24 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("SSH is not active.", "info");
           return;
         }
+        const previous = sessionSsh;
         sessionSsh = null;
         deactivateRemoteTools(ctx);
+        await previous.close();
         ctx.ui.notify("SSH disconnected.", "info");
         return;
       }
 
+      let next: SshConnection;
       try {
-        sessionSsh = await resolveSshArg(trimmed);
+        next = await connectSsh(trimmed);
       } catch (e) {
         ctx.ui.notify(`SSH connection failed: ${e instanceof Error ? e.message : String(e)}`, "error");
         return;
       }
+      const previous = sessionSsh;
+      sessionSsh = next;
+      await previous?.close();
       activateRemoteTools(ctx);
       const active = REMOTE_TOOL_NAMES.filter((name) => pi.getActiveTools().includes(name));
       const safeOnlyNote =
@@ -606,7 +542,7 @@ export default function (pi: ExtensionAPI) {
   // session mode local bash remains the default and bash_remote is opt-in.
   pi.on("user_bash", (_event) => {
     if (!cliSsh) return;
-    return { operations: createRemoteBashOps(cliSsh.remote, cliSsh.remoteCwd, localCwd) };
+    return { operations: createRemoteBashOps(cliSsh, localCwd) };
   });
 
   // Replace local cwd with remote cwd in system prompt — CLI override mode only.
@@ -623,5 +559,8 @@ export default function (pi: ExtensionAPI) {
     for (const timer of timers) clearInterval(timer);
     timers.clear();
     if (cliSsh) clearOperationsOverride();
+    await Promise.all([cliSsh?.close(), sessionSsh?.close()]);
+    cliSsh = null;
+    sessionSsh = null;
   });
 }
