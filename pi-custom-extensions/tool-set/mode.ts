@@ -23,7 +23,7 @@ const MAX_TOOLS_SHOWN = 6;
 const MODE_COMMANDS: { name: string; description: string; mode: Mode }[] = [
 	{
 		name: "safe",
-		description: "Enable safe mode (removes write/edit/bash, adds grep/find/ls)",
+		description: "Enable safe mode (removes write/edit/bash and non-read-only MCP tools, adds grep/find/ls)",
 		mode: "safe",
 	},
 	{

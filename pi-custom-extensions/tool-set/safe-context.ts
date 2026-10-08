@@ -15,7 +15,7 @@ const CUSTOM_TYPE = "safe-mode-context";
 const REMINDER = `
 <system-reminder>
   [SAFE MODE ACTIVE]
-  The write, edit, and bash tools are not currently in your active toolset — they have been removed, not just blocked.
+  The write, edit, and bash tools, and any MCP tool not marked read-only, are not currently in your active toolset — they have been removed, not just blocked.
   Do not attempt to call them; retrying will not surface new information. grep, find, and ls are available in their place for read-only search and inspection.
   If a change is needed, call the change_mode tool with mode: "yolo" to request full tool access. The user can also run /yolo, /auto, or press shift+tab directly at any time.
 </system-reminder>

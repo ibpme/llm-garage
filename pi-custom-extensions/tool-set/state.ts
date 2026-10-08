@@ -12,9 +12,14 @@
  * leaving SAFE restores exactly what was selected before -- no bookkeeping of
  * "tools removed by SAFE" is needed. `pi.setActiveTools` is called from one
  * place, `apply()`.
+ *
+ * Pi itself activates tools outside this module: built-in MCP activates
+ * `direct` tools when a server connects, and `tool_search` declares matches.
+ * Any tool that appears active without having been applied here since the last
+ * apply is absorbed into `selection`, so the next mode change keeps it.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
 
 export type Mode = "yolo" | "safe";
 
@@ -28,6 +33,8 @@ export const SAFE_ONLY_TOOLS = new Set<string>([
 	...SAFE_EXTRA_TOOLS,
 	CHANGE_MODE_TOOL,
 ]);
+
+const MCP_TOOL_PREFIX = "mcp__";
 
 export interface ToolSet {
 	getMode(): Mode;
@@ -50,13 +57,29 @@ export interface ToolSet {
 	 * Set mask() reads, so it takes effect immediately.
 	 */
 	addBlockedTools(names: readonly string[]): void;
+	/**
+	 * Whether SAFE mode refuses this tool: the blocked built-ins, and any MCP
+	 * tool not annotated `readOnlyHint: true` (MCP's default is not read-only).
+	 * Use this as the tool_call guard, since codemode scripts reach MCP tools
+	 * without going through the active set.
+	 */
+	isBlockedInSafe(name: string): boolean;
 	/** Notified after any change that has been applied to pi. */
 	onChange(listener: () => void): () => void;
+}
+
+function isBlockedInSafe(name: string, tools: readonly ToolInfo[]): boolean {
+	if (BLOCKED_TOOLS.has(name)) return true;
+	if (!name.startsWith(MCP_TOOL_PREFIX)) return false;
+	const tool = tools.find((candidate) => candidate.name === name);
+	return tool?.annotations?.readOnlyHint !== true;
 }
 
 export function createToolSet(pi: ExtensionAPI): ToolSet {
 	let mode: Mode = "yolo";
 	let selection: string[] = [];
+	/** Exactly what apply() last passed to pi.setActiveTools(). */
+	let lastApplied = new Set<string>();
 	const listeners = new Set<() => void>();
 
 	function mask(): string[] {
@@ -64,14 +87,30 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 			return selection.filter((name) => !SAFE_ONLY_TOOLS.has(name));
 		}
 
-		const available = new Set(pi.getAllTools().map((tool) => tool.name));
-		const kept = selection.filter((name) => !BLOCKED_TOOLS.has(name));
+		const tools = pi.getAllTools();
+		const available = new Set(tools.map((tool) => tool.name));
+		const kept = selection.filter((name) => !isBlockedInSafe(name, tools));
 		const extras = [...SAFE_ONLY_TOOLS].filter((name) => available.has(name));
 		return [...new Set([...kept, ...extras])];
 	}
 
-	function apply() {
-		pi.setActiveTools(mask());
+	/**
+	 * Adopt tools that pi activated since our last apply (MCP direct tools,
+	 * tool_search matches). Names we applied and then saw removed are not
+	 * re-adopted, so a selection change such as ssh's deactivation sticks.
+	 */
+	function absorbExternalActivations() {
+		for (const name of pi.getActiveTools()) {
+			if (lastApplied.has(name) || SAFE_ONLY_TOOLS.has(name)) continue;
+			if (!selection.includes(name)) selection.push(name);
+		}
+	}
+
+	function apply(absorb = true) {
+		if (absorb) absorbExternalActivations();
+		const next = mask();
+		pi.setActiveTools(next);
+		lastApplied = new Set(next);
 		for (const listener of listeners) listener();
 	}
 
@@ -92,13 +131,19 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 		beginSession() {
 			mode = "yolo";
 			selection = [];
+			lastApplied = new Set();
 		},
 
-		getSelection: () => [...selection],
+		getSelection() {
+			absorbExternalActivations();
+			return [...selection];
+		},
 
 		setSelection(names) {
+			// Explicit names win: do not absorb, or a tool the caller just left out
+			// would be re-adopted from the active set.
 			selection = [...new Set(names)];
-			apply();
+			apply(false);
 		},
 
 		adoptHostSelection() {
@@ -120,6 +165,10 @@ export function createToolSet(pi: ExtensionAPI): ToolSet {
 			// tool set for the session. mask() reads BLOCKED_TOOLS live, so the
 			// next real apply() picks these up anyway.
 			for (const name of names) BLOCKED_TOOLS.add(name);
+		},
+
+		isBlockedInSafe(name) {
+			return isBlockedInSafe(name, pi.getAllTools());
 		},
 
 		onChange(listener) {
