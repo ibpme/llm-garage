@@ -132,7 +132,14 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           if (sessionName) {
             line1 += theme.fg("dim", " • ") + theme.fg("muted", sessionName);
           }
-          line1 = truncateToWidth(line1, width, theme.fg("dim", "..."));
+          const suggestionStatus = extensionStatuses.get("prompt-suggestions");
+          if (suggestionStatus) {
+            const suggestions = truncateToWidth(sanitizeStatus(suggestionStatus), width, theme.fg("dim", "..."));
+            line1 = truncateToWidth(line1, Math.max(0, width - visibleWidth(suggestions) - 1), theme.fg("dim", "..."));
+            line1 += " ".repeat(Math.max(0, width - visibleWidth(line1) - visibleWidth(suggestions))) + suggestions;
+          } else {
+            line1 = truncateToWidth(line1, width, theme.fg("dim", "..."));
+          }
 
           // --- Line 2: token stats + context bar + model ---
           const statParts: string[] = [];
@@ -179,12 +186,17 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           const reasoningStatus = extensionStatuses.get("reasoning-tokens");
           if (reasoningStatus) statParts.push(sanitizeStatus(reasoningStatus));
 
+          const tools = toolStatuses(pi, theme);
+          lastToolStatus = JSON.stringify(tools);
+
           // Prepended (in reverse) rather than appended so the width
           // truncation below eats the stats before it eats these badges.
           for (let index = INLINE_STATUS_KEYS.length - 1; index >= 0; index--) {
             const inlineStatus = extensionStatuses.get(INLINE_STATUS_KEYS[index]);
             if (inlineStatus) {
-              statParts.unshift(sanitizeStatus(inlineStatus));
+              statParts.unshift(
+                sanitizeStatus(inlineStatus) + "  " + tools.indicators,
+              );
             }
           }
 
@@ -225,24 +237,14 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const lines = [line1, line2];
 
-          // Read the live registry: MCP servers connect asynchronously, and
-          // tool_search can activate tools without a mode change.
-          const tools = toolStatuses(pi, theme);
-          lastToolStatus = JSON.stringify(tools);
-          const suggestionStatus = extensionStatuses.get("prompt-suggestions");
           const rest = Array.from(extensionStatuses.entries())
             .filter(([key]) => ![SSH_STATUS_KEY, "tools", "mcp-tools", "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
           {
             const left = [tools.tools, ...(tools.mcp ? [tools.mcp] : []), ...rest].join(theme.fg("dim", " · "));
-            const right = suggestionStatus ? sanitizeStatus(suggestionStatus) : "";
-            const leftWidth = visibleWidth(left);
-            const rightWidth = visibleWidth(right);
-            const gap = left && right ? Math.max(1, width - leftWidth - rightWidth) : 0;
-            const statusLine = left + " ".repeat(gap) + right;
             lines.push(
-              truncateToWidth(statusLine, width, theme.fg("dim", "...")),
+              truncateToWidth(left, width, theme.fg("dim", "...")),
             );
           }
 

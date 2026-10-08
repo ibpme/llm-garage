@@ -46,7 +46,7 @@ function modeLabel(toolSet: ToolSet, ctx: ExtensionContext): string {
 			? theme.bold(theme.fg("success", "● SAFE"))
 			: theme.bold(theme.fg("error", "⏵⏵ YOLO"));
 
-	return badge + theme.fg("dim", " (shift+tab)");
+	return badge;
 }
 
 export function registerMode(pi: ExtensionAPI, toolSet: ToolSet) {

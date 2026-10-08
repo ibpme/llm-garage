@@ -1,5 +1,9 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 
+import { rgbColor } from "@earendil-works/pi-tui";
+
+const SEARCH_COLOR = rgbColor(106, 169, 255);
+const CODEMODE_COLOR = rgbColor(245, 158, 66);
 const MAX_SHOWN = 6;
 const MCP_RESOURCE_TOOLS = new Set([
 	"list_mcp_resources",
@@ -7,11 +11,11 @@ const MCP_RESOURCE_TOOLS = new Set([
 	"read_mcp_resource",
 ]);
 
-export function toolStatuses(pi: ExtensionAPI, theme: Theme): { tools: string; mcp: string } {
+export function toolStatuses(pi: ExtensionAPI, theme: Theme): { tools: string; mcp: string; indicators: string } {
 	const all = pi.getAllTools();
 	const active = pi.getActiveTools();
 	const builtins = new Set(all.filter((tool) => tool.sourceInfo.source === "builtin").map((tool) => tool.name));
-	const local = active.filter((name) => !name.startsWith("mcp__") && !MCP_RESOURCE_TOOLS.has(name));
+	const local = active.filter((name) => !name.startsWith("mcp__") && !MCP_RESOURCE_TOOLS.has(name) && name !== "tool_search" && name !== "codemode");
 	const ordered = [...local.filter((name) => builtins.has(name)), ...local.filter((name) => !builtins.has(name))];
 	const format = (prefix: string, entries: string[]) =>
 		theme.fg("dim", `${prefix}:`) + theme.fg("muted", entries.slice(0, MAX_SHOWN).join(", ") || "none") +
@@ -35,5 +39,11 @@ export function toolStatuses(pi: ExtensionAPI, theme: Theme): { tools: string; m
 		? theme.fg("muted", entries.slice(0, MAX_SHOWN).join(" ")) +
 			(entries.length > MAX_SHOWN ? theme.fg("dim", ` +${entries.length - MAX_SHOWN}`) : "")
 		: theme.fg("dim", "none");
-	return { tools: format("tools", ordered), mcp: badge + details };
+	const searchIndicator = active.includes("tool_search")
+		? theme.style("󰍉", { fg: SEARCH_COLOR }) + " "
+		: "";
+	const indicators = active.includes("codemode")
+		? theme.style("  codemode", { fg: CODEMODE_COLOR })
+		: theme.fg("dim", "  codemode");
+	return { tools: searchIndicator + format("tools", ordered), mcp: badge + details, indicators };
 }
