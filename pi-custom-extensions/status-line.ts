@@ -171,7 +171,10 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           let statsLeft = statParts.join(theme.fg("dim", " · "));
 
           const modelName = ctx.model?.id || "no-model";
-          let rightSide = theme.fg("accent", theme.bold(modelName));
+          const modelLabel = ctx.model
+            ? `${ctx.model.provider}/${modelName}`
+            : modelName;
+          let rightSide = theme.fg("accent", theme.bold(modelLabel));
           if (ctx.model?.reasoning) {
             const level = pi.getThinkingLevel() || "off";
             rightSide +=
@@ -202,17 +205,20 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           const lines = [line1, line2];
 
+          const suggestionStatus = extensionStatuses.get("prompt-suggestions");
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => key !== "reasoning-tokens" && key !== "agent-stats" && !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
+            .filter(([key]) => key !== "reasoning-tokens" && key !== "agent-stats" && key !== "prompt-suggestions" && !(INLINE_STATUS_KEYS as readonly string[]).includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
-          if (rest.length > 0) {
+          if (rest.length > 0 || suggestionStatus) {
+            const left = rest.join(theme.fg("dim", " · "));
+            const right = suggestionStatus ? sanitizeStatus(suggestionStatus) : "";
+            const leftWidth = visibleWidth(left);
+            const rightWidth = visibleWidth(right);
+            const gap = left && right ? Math.max(1, width - leftWidth - rightWidth) : 0;
+            const statusLine = left + " ".repeat(gap) + right;
             lines.push(
-              truncateToWidth(
-                rest.join(theme.fg("dim", " · ")),
-                width,
-                theme.fg("dim", "..."),
-              ),
+              truncateToWidth(statusLine, width, theme.fg("dim", "...")),
             );
           }
 
