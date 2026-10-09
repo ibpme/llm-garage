@@ -27,38 +27,58 @@ test("SAFE masks selection and YOLO restores it", () => {
   assert.deepEqual(h.active(), ["read", "write", "edit", "bash"]);
 });
 
-test("external activations are absorbed but explicit removal sticks", () => {
+test("tools activated by the host remain selected after a mode change", () => {
   const h = host();
   const tools = createToolSet(h.pi);
   tools.adoptHostSelection();
   h.activate("new_tool");
   tools.setMode("safe");
   assert.ok(h.active().includes("new_tool"));
+});
+
+test("an explicit selection removes tools without re-adopting them from the host", () => {
+  const h = host();
+  const tools = createToolSet(h.pi);
+  tools.adoptHostSelection();
+  tools.setMode("safe");
   tools.setSelection(["read"]);
   tools.setMode("yolo");
   assert.deepEqual(h.active(), ["read"]);
 });
 
-test("SAFE blocks unannotated MCP tools and allows read-only MCP tools", () => {
-  const h = host(["read", "mcp__server__unknown", "mcp__server__read"]);
-  h.tools.find((tool) => tool.name === "mcp__server__read")!.annotations = { readOnlyHint: true };
-  const tools = createToolSet(h.pi);
-  tools.adoptHostSelection();
-  tools.setMode("safe");
-  assert.ok(!h.active().includes("mcp__server__unknown"));
-  assert.ok(h.active().includes("mcp__server__read"));
+for (const [name, annotation, blocked] of [
+  ["unannotated MCP tools", undefined, true],
+  ["read-only MCP tools", { readOnlyHint: true }, false],
+] as const) {
+  test(`SAFE ${blocked ? "blocks" : "allows"} ${name}`, () => {
+    const h = host(["read", "mcp__server__tool"]);
+    h.tools.find((tool) => tool.name === "mcp__server__tool")!.annotations = annotation;
+    const tools = createToolSet(h.pi);
+    tools.adoptHostSelection();
+    tools.setMode("safe");
+    assert.equal(h.active().includes("mcp__server__tool"), !blocked);
+  });
+}
+
+test("SAFE treats missing MCP tool metadata as blocked", () => {
+  const tools = createToolSet(host().pi);
   assert.equal(tools.isBlockedInSafe("mcp__missing__tool"), true);
 });
 
-test("session reset restores the default mode and listeners can unsubscribe", () => {
-  const h = host();
-  const tools = createToolSet(h.pi);
-  let calls = 0;
-  const unsubscribe = tools.onChange(() => calls++);
+test("unsubscribed listeners receive no further tool changes", () => {
+  const tools = createToolSet(host().pi);
+  const modes: string[] = [];
+  const unsubscribe = tools.onChange(() => modes.push(tools.getMode()));
   tools.adoptHostSelection();
   unsubscribe();
   tools.setMode("safe");
-  assert.equal(calls, 1);
+  assert.deepEqual(modes, ["yolo"]);
+});
+
+test("a new session restores YOLO and excludes SAFE-only tools from selection", () => {
+  const tools = createToolSet(host().pi);
+  tools.adoptHostSelection();
+  tools.setMode("safe");
   tools.beginSession();
   assert.equal(tools.getMode(), "yolo");
   tools.adoptHostSelection();
