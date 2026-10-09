@@ -65,6 +65,7 @@ function formatUsageLine(usage: CycleUsage, theme: Theme): string {
     `${theme.fg("dim", "cache read ")}${theme.fg("muted", formatTokens(usage.cacheRead))}`,
     `${theme.fg("dim", "cache write ")}${theme.fg("muted", formatTokens(usage.cacheWrite))}`,
     `${theme.fg("dim", "total ")}${theme.fg("text", formatTokens(usage.totalTokens))}`,
+    ...(usage.reasoning === undefined ? [] : [`${theme.fg("dim", "reasoning ")}${theme.fg("accent", formatTokens(usage.reasoning))}`]),
     `${theme.fg("dim", "cost ")}${theme.fg("warning", formatCost(usage.costTotal))}`,
   ].join(sep);
 }
@@ -118,14 +119,17 @@ export function formatDetail(
   const toolSumMs = cycles.reduce((sum, cycle) => sum + cycle.toolSumMs, 0);
   const overheadMs = cycles.reduce((sum, cycle) => sum + cycle.overheadMs, 0);
   const outputTokens = cycles.reduce((sum, cycle) => sum + cycle.outputTokens, 0);
-  const timedOutputTokens = cycles.reduce(
-    (sum, cycle) => sum + (cycle.generationMs && cycle.generationMs > 0 ? cycle.outputTokens : 0),
-    0,
-  );
+  const timedOutputTokens = cycles.reduce((sum, cycle) => {
+    if (!cycle.responses) return sum + (cycle.generationMs && cycle.generationMs > 0 ? cycle.outputTokens : 0);
+    return sum + cycle.responses.reduce((responseSum, response) =>
+      responseSum + (response.generationMs && response.generationMs > 0 ? response.outputTokens : 0), 0,
+    );
+  }, 0);
   const weightedTps = generationMs > 0 ? timedOutputTokens / (generationMs / 1000) : undefined;
-  const ttfts = cycles
-    .map((cycle) => cycle.ttftMs)
-    .filter((value): value is number => value !== undefined);
+  const ttfts = cycles.flatMap((cycle) => cycle.responses
+    ? cycle.responses.map((response) => response.ttftMs)
+    : [cycle.ttftMs],
+  ).filter((value): value is number => value !== undefined);
   const averageTtft = ttfts.length > 0 ? ttfts.reduce((sum, value) => sum + value, 0) / ttfts.length : undefined;
 
   lines.push(theme.bold(theme.fg("accent", "Conversation summary")));
@@ -136,6 +140,7 @@ export function formatDetail(
   lines.push(`  Output tokens:        ${theme.fg("success", formatTokens(outputTokens))}`);
   lines.push(`  Cache read/write:     ${theme.fg("muted", formatTokens(usage.cacheRead))} / ${theme.fg("muted", formatTokens(usage.cacheWrite))}`);
   lines.push(`  Total tokens:         ${theme.fg("text", formatTokens(usage.totalTokens))}`);
+  if (usage.reasoning !== undefined) lines.push(`  Reasoning tokens:     ${theme.fg("accent", formatTokens(usage.reasoning))}`);
   lines.push(`  Cost:                 ${theme.fg("warning", formatCost(usage.costTotal))}`);
   lines.push(`  Weighted throughput:  ${theme.fg("success", formatRate(weightedTps))}`);
   lines.push(
@@ -193,6 +198,15 @@ export function formatDetail(
     );
     if (cycle.usage) {
       lines.push(`  ${formatUsageLine(cycle.usage, theme)}`);
+    }
+    if (cycle.responses && cycle.responses.length > 0) {
+      lines.push(`  responses: ${cycle.responses.map((response, responseIndex) =>
+        `#${responseIndex + 1} ${formatTokens(response.outputTokens)} output · ` +
+        `${formatRate(response.generationMs && response.generationMs > 0
+          ? response.outputTokens / (response.generationMs / 1000)
+          : undefined)} · TTFT ${formatDuration(response.ttftMs)}` +
+        (response.reasoning === undefined ? "" : ` · reasoning ${formatTokens(response.reasoning)}`),
+      ).join(" · ")}`);
     }
     lines.push(
       `  generation ${formatDuration(cycle.generationMs)} · tools ${formatDuration(cycle.toolWallMs)} wall / ` +

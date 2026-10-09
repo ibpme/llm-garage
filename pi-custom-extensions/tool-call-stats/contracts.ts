@@ -22,6 +22,14 @@ export interface CycleUsage {
   cacheWrite: number;
   totalTokens: number;
   costTotal: number;
+  reasoning?: number;
+}
+
+export interface PersistedResponse {
+  ttftMs?: number;
+  generationMs?: number;
+  outputTokens: number;
+  reasoning?: number;
 }
 
 export interface PersistedCycle {
@@ -41,6 +49,7 @@ export interface PersistedCycle {
   toolSumMs: number;
   overheadMs: number;
   tools: ToolTiming[];
+  responses?: PersistedResponse[];
 }
 
 interface ActiveTool {
@@ -56,15 +65,14 @@ export interface ActiveCycle {
   startedAt: number;
   startedWallTime: number;
   phase: CyclePhase;
-  providerRequestAt?: number;
-  firstGeneratedAt?: number;
-  generationEndedAt?: number;
   providerAttempts: number;
   tools: ToolTiming[];
   activeTools: Map<string, ActiveTool>;
   reasoningTokens?: number;
   usage: CycleUsage;
   countedAssistantTimestamps: Set<number>;
+  responses: PersistedResponse[];
+  currentResponse?: { requestAt: number; firstGeneratedAt?: number };
 }
 
 export interface ToolTimingStat extends ToolStat {

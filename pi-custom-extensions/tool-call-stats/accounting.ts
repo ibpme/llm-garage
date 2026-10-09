@@ -18,6 +18,7 @@ export function addUsage(target: CycleUsage, usage: AssistantMessage["usage"]): 
   target.cacheWrite += usage.cacheWrite;
   target.totalTokens += usage.totalTokens;
   target.costTotal += usage.cost.total;
+  if (usage.reasoning !== undefined) target.reasoning = (target.reasoning ?? 0) + usage.reasoning;
 }
 
 export function sumUsage(cycles: readonly PersistedCycle[]): CycleUsage {
@@ -30,6 +31,7 @@ export function sumUsage(cycles: readonly PersistedCycle[]): CycleUsage {
     total.cacheWrite += cycle.usage.cacheWrite;
     total.totalTokens += cycle.usage.totalTokens;
     total.costTotal += cycle.usage.costTotal;
+    if (cycle.usage.reasoning !== undefined) total.reasoning = (total.reasoning ?? 0) + cycle.usage.reasoning;
   }
   return total;
 }
@@ -127,6 +129,14 @@ export function totalToolCalls(stats: Map<string, ToolStat>): number {
 }
 
 export function cycleTps(cycle: PersistedCycle): number | undefined {
+  if (cycle.responses) {
+    const timed = cycle.responses.filter((response) =>
+      response.generationMs !== undefined && response.generationMs > 0 && response.outputTokens > 0,
+    );
+    const generationMs = timed.reduce((sum, response) => sum + response.generationMs!, 0);
+    const outputTokens = timed.reduce((sum, response) => sum + response.outputTokens, 0);
+    return generationMs > 0 ? outputTokens / (generationMs / 1000) : undefined;
+  }
   if (!cycle.generationMs || cycle.generationMs <= 0 || cycle.outputTokens <= 0) return undefined;
   return cycle.outputTokens / (cycle.generationMs / 1000);
 }

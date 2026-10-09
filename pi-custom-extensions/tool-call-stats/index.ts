@@ -97,14 +97,32 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
       activeTools: new Map(),
       usage: emptyUsage(),
       countedAssistantTimestamps: new Set(),
+      responses: [],
     };
     refreshStatus(ctx);
     startLiveTimer(ctx);
   });
 
+  function finishResponse(cycle: ActiveCycle, message: AssistantMessage, at: number) {
+    const response = cycle.currentResponse;
+    if (!response) return;
+    cycle.responses.push({
+      ttftMs: response.firstGeneratedAt === undefined
+        ? undefined
+        : Math.max(0, response.firstGeneratedAt - response.requestAt),
+      generationMs: response.firstGeneratedAt === undefined
+        ? undefined
+        : Math.max(0, at - response.firstGeneratedAt),
+      outputTokens: message.usage.output,
+      reasoning: message.usage.reasoning,
+    });
+    cycle.currentResponse = undefined;
+  }
+
   pi.on("before_provider_request", async (_event, ctx) => {
-    if (!activeCycle || activeCycle.firstGeneratedAt !== undefined) return;
-    activeCycle.providerRequestAt = now();
+    if (!activeCycle) return;
+    const requestAt = now();
+    activeCycle.currentResponse = { requestAt };
     activeCycle.providerAttempts++;
     activeCycle.phase = "waiting";
     refreshWorkingMessage(ctx);
@@ -116,12 +134,11 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
     const current = now();
     let phaseChanged = false;
     if (
-      activeCycle.firstGeneratedAt === undefined &&
       (["text_delta", "thinking_delta", "toolcall_delta"] as GeneratedDeltaType[]).includes(
         streamEvent.type as GeneratedDeltaType,
-      )
+      ) && activeCycle.currentResponse?.firstGeneratedAt === undefined
     ) {
-      activeCycle.firstGeneratedAt = current;
+      if (activeCycle.currentResponse) activeCycle.currentResponse.firstGeneratedAt = current;
     }
 
     if (streamEvent.type === "thinking_start" || streamEvent.type === "thinking_delta") {
@@ -139,16 +156,14 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
       activeCycle.phase = "preparing-tools";
     }
 
-    if (streamEvent.type === "done" || streamEvent.type === "error") {
-      activeCycle.generationEndedAt = current;
-    }
     if (phaseChanged) refreshWorkingMessage(ctx);
   });
 
   pi.on("message_end", async (event, _ctx) => {
     if (!activeCycle || event.message.role !== "assistant") return;
-    activeCycle.generationEndedAt ??= now();
-    recordAssistantUsage(activeCycle, event.message as AssistantMessage);
+    const message = event.message as AssistantMessage;
+    finishResponse(activeCycle, message, now());
+    recordAssistantUsage(activeCycle, message);
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
@@ -200,14 +215,16 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
     const assistant = event.message.role === "assistant" ? (event.message as AssistantMessage) : undefined;
     if (assistant) recordAssistantUsage(activeCycle, assistant);
     const elapsedMs = endedAt - activeCycle.startedAt;
-    const generationMs =
-      activeCycle.firstGeneratedAt !== undefined && activeCycle.generationEndedAt !== undefined
-        ? Math.max(0, activeCycle.generationEndedAt - activeCycle.firstGeneratedAt)
-        : undefined;
-    const ttftMs =
-      activeCycle.providerRequestAt !== undefined && activeCycle.firstGeneratedAt !== undefined
-        ? Math.max(0, activeCycle.firstGeneratedAt - activeCycle.providerRequestAt)
-        : undefined;
+    const measuredResponses = activeCycle.responses.filter((response) => response.generationMs !== undefined);
+    const generationMs = measuredResponses.length > 0
+      ? measuredResponses.reduce((sum, response) => sum + response.generationMs!, 0)
+      : undefined;
+    const ttfts = activeCycle.responses
+      .map((response) => response.ttftMs)
+      .filter((value): value is number => value !== undefined);
+    const ttftMs = ttfts.length > 0
+      ? ttfts.reduce((sum, value) => sum + value, 0) / ttfts.length
+      : undefined;
     const toolWallMs = mergedIntervalDuration(activeCycle.tools);
     const toolSumMs = activeCycle.tools.reduce((sum, tool) => sum + tool.durationMs, 0);
     const overheadMs = Math.max(0, elapsedMs - (generationMs ?? 0) - toolWallMs);
@@ -229,6 +246,7 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
       toolSumMs,
       overheadMs,
       tools: activeCycle.tools,
+      responses: activeCycle.responses,
     };
 
     pi.appendEntry(ENTRY_TYPE, persisted);
