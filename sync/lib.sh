@@ -63,32 +63,20 @@ link_dir_contents() {
   shopt -u nullglob
 }
 
-# link_pi_extensions SRC_DIR DEST_DIR
-# Like link_dir_contents, but links only what pi's extension loader can
-# discover: top-level *.ts files and subdirectories containing index.ts. Dev
-# scaffolding (package.json, tsconfig.json, lockfiles, README.md,
-# node_modules/) stays out of the extension directory.
-#
-# shared/ is linked deliberately even though it is not an extension: pi skips
-# a subdirectory with no index.ts and no "pi" manifest, but extension files
-# import from it relatively, so it has to exist alongside them.
+# Link one manifest-driven package, removing only legacy per-entry repo links.
+# The package root keeps runtime imports next to its single node_modules tree.
 link_pi_extensions() {
-  local src_dir="$1" dest_dir="$2" entry name
+  local src_dir="$1" dest_dir="$2" entry target
   [ -d "$src_dir" ] || return 0
   mkdir -p "$dest_dir"
-  shopt -s nullglob
-  for entry in "$src_dir"/*.ts; do
-    link_one "$entry" "$dest_dir/$(basename "$entry")"
+  for entry in "$dest_dir"/*; do
+    [ -L "$entry" ] || continue
+    target="$(readlink "$entry")"
+    case "$target" in
+      "$src_dir"/*) unlink_one "$entry" ;;
+    esac
   done
-  for entry in "$src_dir"/*/; do
-    entry="${entry%/}"
-    name="$(basename "$entry")"
-    [ "$name" = "node_modules" ] && continue
-    if [ -f "$entry/index.ts" ] || [ "$name" = "shared" ]; then
-      link_one "$entry" "$dest_dir/$name"
-    fi
-  done
-  shopt -u nullglob
+  link_one "$src_dir" "$dest_dir/llm-garage"
 }
 
 # unlink_one DEST

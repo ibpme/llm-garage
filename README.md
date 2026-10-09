@@ -12,7 +12,7 @@ context/GLOBAL.md        canonical global instructions (-> CLAUDE.md / AGENTS.md
 skills/<name>/SKILL.md    canonical skills (same SKILL.md format across all four tools)
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
 mcp/pi-mcp.json           native pi MCP server defaults -- opt-in, see below
-pi-custom-extensions/      pi-specific TypeScript extensions (hotkeyed mode toggle, status line, etc.)
+pi-custom-extensions/      one local Pi package of TypeScript extensions + tracked Bun lockfile
 pi-custom-config/           tracked defaults for mutable pi extension configuration
 pi-custom-keybinds/         pi-specific keybindings.json override
 sync/
@@ -31,6 +31,13 @@ sync/
 Skills, context, and prompts are linked directly from this repo; no generation
 step is needed. Editing those source files takes effect immediately. Re-run
 sync when adding or removing entries. Subagent syncing is not managed here.
+
+Pi extensions load as one local package through
+`~/.pi/agent/extensions/llm-garage`, with explicit entry points in
+`pi-custom-extensions/package.json`. Runtime and development dependencies share
+one installation; see [extension development](pi-custom-extensions/README.md).
+Sync migrates legacy individual extension symlinks and preserves unrelated
+local extensions. Source and manifest changes require only `/reload`.
 
 MCP servers are **opt-in and off by default**. Currently only pi MCP servers
 are managed: `sync-pi.sh --with-mcp` reads `mcp/pi-mcp.json` and merges its
@@ -139,13 +146,15 @@ removes the `skills` key it set in `~/.pi/agent/settings.json` during sync.
 ```
 git clone <this repo> ~/Documents/Code/llm-garage
 cd ~/Documents/Code/llm-garage
+(cd pi-custom-extensions && bun install --frozen-lockfile)
 ./sync/sync-all.sh              # skip MCP (opt in with --with-mcp, see below)
 ```
 
 Any existing file at a target path is renamed aside as
 `<file>.pre-llm-garage.<timestamp>` before the symlink is created --
-nothing is silently overwritten. Requires bash and `uv` (the Python helper
-uses only the standard library).
+nothing is silently overwritten. Sync requires bash and `uv` (the Python helper
+uses only the standard library). Pi extensions additionally require Bun to
+install their dependencies and Pi matching the pinned development version.
 
 ## Windows
 

@@ -3,16 +3,44 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:loading": "node scripts/test-loading.mjs"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "latest",
-    "@earendil-works/pi-ai": "latest",
-    "@earendil-works/pi-coding-agent": "latest",
-    "@earendil-works/pi-tui": "latest",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0",
     "@types/node": "24.12.4",
-    "grok-mermaid": "0.2.2",
-    "typebox": "latest",
+    "typebox": "1.3.17",
     "typescript": "5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./alias.ts",
+      "./permission-gate.ts",
+      "./prompt-suggestions.ts",
+      "./protected-paths.ts",
+      "./questionnare.ts",
+      "./readmd.ts",
+      "./reasoning-tokens.ts",
+      "./ssh.ts",
+      "./status-line.ts",
+      "./stylish-tools.ts",
+      "./system-prompt.ts",
+      "./thinking-style.ts",
+      "./tool-call-stats.ts",
+      "./tool-set/index.ts"
+    ]
+  },
+  "dependencies": {
+    "grok-mermaid": "0.2.2"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   }
 }

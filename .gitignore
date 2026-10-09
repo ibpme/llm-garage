@@ -3,10 +3,12 @@ __pycache__/
 *.pyc
 **/node_modules/
 
-# Dependency lockfiles are intentionally not tracked; use the current Pi release.
+# Only the consolidated Pi package uses a tracked dependency lockfile.
 **/bun.lock
 **/bun.lockb
 **/package-lock.json
 **/npm-shrinkwrap.json
 **/pnpm-lock.yaml
 **/yarn.lock
+
+!pi-custom-extensions/bun.lock

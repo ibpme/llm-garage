@@ -14,8 +14,8 @@ link_dir_contents "$REPO_ROOT/prompts" "$TARGET/prompts"
 # sync-claude.sh / sync-codex.sh populate.
 uv run "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.claude/skills","~/.codex/skills"]'
 
-# Symlink custom extensions from this repo into pi's extensions dir
-# (individual entry links, so pi-specific local extensions stay untouched).
+# Link the manifest-driven local package; migrate old individual repo links.
+# Unrelated local extensions stay untouched.
 link_pi_extensions "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
 # Install mutable extension defaults once. Unlike extensions and keybindings,

@@ -144,6 +144,54 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(set(json.loads(self.config.read_text())["mcpServers"]), {"personal"})
         self.run_script("unsync-pi.sh", "--with-mcp")
 
+    def test_pi_package_migrates_legacy_links(self) -> None:
+        extensions = self.home / ".pi/agent/extensions"
+        extensions.mkdir()
+        (extensions / "status-line.ts").symlink_to(ROOT / "pi-custom-extensions/status-line.ts")
+        (extensions / "shared").symlink_to(ROOT / "pi-custom-extensions/shared")
+        (extensions / "tool-set").symlink_to(ROOT / "pi-custom-extensions/tool-set")
+        backup = extensions / "status-line.ts.pre-llm-garage.20260101T000000"
+        backup.write_text("original local extension")
+        personal = extensions / "personal.ts"
+        personal.write_text("personal extension")
+        external = extensions / "external.ts"
+        external.symlink_to(self.home / "external.ts")
+        self.run_script("sync-pi.sh")
+        package = extensions / "llm-garage"
+        self.assertEqual(package.resolve(), ROOT / "pi-custom-extensions")
+        self.assertEqual((extensions / "status-line.ts").read_text(), "original local extension")
+        self.assertFalse((extensions / "shared").exists())
+        self.assertFalse((extensions / "tool-set").exists())
+        before = package.lstat().st_mtime_ns
+        self.run_script("sync-pi.sh")
+        self.assertEqual(package.lstat().st_mtime_ns, before)
+        self.assertEqual(personal.read_text(), "personal extension")
+        self.assertTrue(external.is_symlink())
+        self.run_script("unsync-pi.sh")
+        self.assertFalse(package.exists())
+        self.assertEqual(personal.read_text(), "personal extension")
+        self.assertTrue(external.is_symlink())
+
+    def test_pi_manifest_lists_only_extension_entry_points(self) -> None:
+        root = ROOT / "pi-custom-extensions"
+        manifest = json.loads((root / "package.json").read_text())
+        entries = manifest["pi"]["extensions"]
+        self.assertTrue(entries)
+        self.assertEqual(entries, sorted(set(entries)))
+        for entry in entries:
+            path = root / entry
+            self.assertTrue(path.is_file(), entry)
+            self.assertTrue(path.resolve().is_relative_to(root.resolve()), entry)
+            self.assertTrue(
+                path.suffix == ".ts" and (path.parent == root or path.name == "index.ts"),
+                entry,
+            )
+            self.assertNotIn(path.relative_to(root).parts[0], {"shared", "scripts", "node_modules"})
+        self.assertNotIn("grok-mermaid", manifest["devDependencies"])
+        self.assertIn("grok-mermaid", manifest["dependencies"])
+        for name in manifest["peerDependencies"]:
+            self.assertNotIn(name, manifest["dependencies"])
+
     def test_all_scripts_without_generator(self) -> None:
         self.run_script("sync-all.sh", "--with-mcp")
         for dest in (".claude/commands", ".codex/prompts", ".config/opencode/commands", ".pi/agent/prompts"):
