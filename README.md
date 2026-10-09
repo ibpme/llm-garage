@@ -75,6 +75,41 @@ ordinary files when their live config does not exist. This is intentional for
 mutable extension state: pi can update the live copy without modifying this
 repository, and later syncs preserve the user's local preference.
 
+## Detached agent launcher
+
+`scripts/agent-spawn.sh` starts Pi in its own detached tmux session, either
+interactively or as a one-shot JSON event stream. The first version supports
+Pi only; Claude can be added later.
+
+```bash
+./scripts/agent-spawn.sh --name review-api --cwd "$PWD" \
+  --model sonnet:high --prompt-file /path/to/task.md
+# Later: tmux attach -t review-api
+
+./scripts/agent-spawn.sh --name review-once --mode json \
+  --prompt-file /path/to/task.md
+# Prints the job directory containing events.jsonl, stderr.log, and exit.status
+```
+
+JSON mode requires a prompt. Its `events.jsonl` can be followed while the job
+runs or replayed later; `exit.status` appears after Pi exits. A missing status
+file means the job did not record a normal exit. Pi can exit with status 0 even
+when an agent response failed or was aborted; inspect the JSON events for that.
+By default, files are saved under `~/.local/state/agent-spawn/`; use
+`--output-dir` to override the parent directory. Files may contain sensitive
+prompts, tool calls, and results and are stored in private job directories. `/agents` shows a JSON-mode job only while
+its process is running.
+
+Omit the prompt to open Pi ready for input, or use `--prompt '...'` instead of
+`--prompt-file` for short tasks. `--shell zsh` (the default) or `--shell bash`
+starts an interactive login shell before Pi, so its startup files can set the
+agent's environment. Shell names are resolved on `PATH`, or supply an absolute
+path such as `--shell /usr/local/bin/zsh`; Bash is required to run the launcher.
+Optional `--provider` requires `--model`; `--socket` selects a non-default tmux
+server. Interactive launches confirm the process stays running briefly;
+JSON launches report startup separately from Pi's eventual exit status. Run
+`./scripts/agent-spawn.sh --help` for the full interface.
+
 ## Undoing a sync
 
 ```
