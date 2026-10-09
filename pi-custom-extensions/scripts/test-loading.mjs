@@ -29,7 +29,35 @@ try {
     result.extensions.map((extension) => realpathSync(extension.resolvedPath)).sort(),
     manifest.pi.extensions.map((entry) => realpathSync(join(root, entry))).sort(),
   );
-  console.log(`Loaded all ${result.extensions.length} extensions exactly once via the package symlink.`);
+  const serviceKey = Symbol.for("llm-garage.pi-custom-extensions.tool-set");
+  const firstService = globalThis[serviceKey];
+  assert.ok(firstService, "the real loader must publish the ToolSet service");
+  const firstToolSet = result.extensions.find((extension) =>
+    realpathSync(extension.resolvedPath) === realpathSync(join(root, "tool-set/index.ts")),
+  );
+
+  await loader.reload();
+  const reloaded = loader.getExtensions();
+  assert.deepEqual(reloaded.errors, []);
+  assert.deepEqual(reloaded.warnings, []);
+  assert.deepEqual(
+    reloaded.extensions.map((extension) => realpathSync(extension.resolvedPath)).sort(),
+    manifest.pi.extensions.map((entry) => realpathSync(join(root, entry))).sort(),
+  );
+  const replacement = globalThis[serviceKey];
+  assert.notEqual(replacement, firstService, "reload must publish a fresh service");
+  for (const handler of firstToolSet.handlers.get("session_shutdown") ?? []) {
+    await handler({ type: "session_shutdown" }, {});
+  }
+  assert.equal(globalThis[serviceKey], replacement, "stale shutdown must preserve the replacement service");
+  const currentToolSet = reloaded.extensions.find((extension) =>
+    realpathSync(extension.resolvedPath) === realpathSync(join(root, "tool-set/index.ts")),
+  );
+  for (const handler of currentToolSet.handlers.get("session_shutdown") ?? []) {
+    await handler({ type: "session_shutdown" }, {});
+  }
+  assert.equal(globalThis[serviceKey], undefined, "shutdown must unpublish the current service");
+  console.log(`Loaded all ${result.extensions.length} extensions exactly once per load; verified reload and stale-service cleanup.`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

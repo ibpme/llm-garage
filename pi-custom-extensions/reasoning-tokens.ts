@@ -1,8 +1,8 @@
+import { REASONING_TOKENS_LIVE_EVENT, type ReasoningTokensLivePayload } from "./contracts/events.ts";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const STATUS_ID = "reasoning-tokens";
-const LIVE_EVENT = "reasoning-tokens:live";
 
 function formatTokens(count: number): string {
   if (count < 1000) return `${count}`;
@@ -49,14 +49,14 @@ export default function reasoningTokensExtension(pi: ExtensionAPI) {
     if (reasoning === undefined || reasoning === lastReported) return;
     lastReported = reasoning;
     liveTokens = reasoning;
-    pi.events.emit(LIVE_EVENT, { tokens: reasoning });
+    pi.events.emit(REASONING_TOKENS_LIVE_EVENT, { tokens: reasoning } satisfies ReasoningTokensLivePayload);
     refreshStatus(ctx);
   });
 
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return;
     const reasoning = (event.message as AssistantMessage).usage.reasoning;
-    if (reasoning !== undefined) pi.events.emit(LIVE_EVENT, { tokens: reasoning });
+    if (reasoning !== undefined) pi.events.emit(REASONING_TOKENS_LIVE_EVENT, { tokens: reasoning } satisfies ReasoningTokensLivePayload);
     liveTokens = undefined;
     lastReported = undefined;
     refreshStatus(ctx);

@@ -8,7 +8,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ToolSet } from "./state.ts";
+import type { ToolSet } from "./contracts.ts";
 
 const CUSTOM_TYPE = "safe-mode-context";
 
@@ -22,31 +22,31 @@ const REMINDER = `
 `;
 
 export function registerSafeContext(pi: ExtensionAPI, toolSet: ToolSet) {
-	pi.on("context", async (event) => {
-		const messages = event.messages.filter(
-			(message) =>
-				(message as AgentMessage & { customType?: string }).customType !==
-				CUSTOM_TYPE,
-		);
-		const staleMessageRemoved = messages.length !== event.messages.length;
+  pi.on("context", async (event) => {
+    const messages = event.messages.filter(
+      (message) =>
+        (message as AgentMessage & { customType?: string }).customType !==
+        CUSTOM_TYPE,
+    );
+    const staleMessageRemoved = messages.length !== event.messages.length;
 
-		if (toolSet.getMode() !== "safe") {
-			return staleMessageRemoved ? { messages } : undefined;
-		}
+    if (toolSet.getMode() !== "safe") {
+      return staleMessageRemoved ? { messages } : undefined;
+    }
 
-		return {
-			messages: [
-				// Keep this stable at the beginning of the context so later requests
-				// remain append-only and can reuse the provider's cached prefix.
-				{
-					role: "user",
-					customType: CUSTOM_TYPE,
-					content: REMINDER,
-					display: false,
-					timestamp: 0,
-				},
-				...messages,
-			],
-		};
-	});
+    return {
+      messages: [
+        // Keep this stable at the beginning of the context so later requests
+        // remain append-only and can reuse the provider's cached prefix.
+        {
+          role: "user",
+          customType: CUSTOM_TYPE,
+          content: REMINDER,
+          display: false,
+          timestamp: 0,
+        },
+        ...messages,
+      ],
+    };
+  });
 }

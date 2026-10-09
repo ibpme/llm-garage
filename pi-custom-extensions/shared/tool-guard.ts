@@ -50,7 +50,7 @@ export interface ToolGuardRule {
 
 /**
  * Register one `tool_call` handler that runs `rules` in order. The first rule
- * returning a verdict decides the call; later rules are not consulted.
+ * returning a block denies the call; confirmed rules continue to later rules.
  */
 export function registerToolGuard(
 	pi: ExtensionAPI,

@@ -1,5 +1,5 @@
 /**
- * SSH transport for ssh.ts: spawns `ssh`, enforces timeouts/abort, tracks
+ * SSH transport: spawns `ssh`, enforces timeouts/abort, tracks
  * live children, and classifies failures.
  */
 import { spawn, type ChildProcess } from "node:child_process";

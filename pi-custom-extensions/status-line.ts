@@ -1,3 +1,4 @@
+import { MODE_STATUS_KEY, SSH_STATUS_KEY } from "./contracts/status-keys.ts";
 /**
  * Colorful Status Line Extension
  *
@@ -19,9 +20,7 @@ import { toolStatuses } from "./shared/tool-status.ts";
 const BAR_WIDTH = 10;
 
 /** Extension statuses hoisted onto line 2 instead of the trailing status line. */
-const INLINE_STATUS_KEYS = ["mode"] as const;
-/** Shown on line 1 right after the local cwd/branch. */
-const SSH_STATUS_KEY = "ssh";
+const INLINE_STATUS_KEYS = [MODE_STATUS_KEY] as const;
 
 function sanitizeStatus(text: string): string {
   return text

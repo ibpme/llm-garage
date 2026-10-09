@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:loading": "node scripts/test-loading.mjs"
+    "test:loading": "node scripts/test-loading.mjs",
+    "test": "node scripts/test.mjs",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "check": "bun run typecheck && bun run check:architecture && bun run test && bun run test:loading"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.1.0",
@@ -19,17 +22,17 @@
     "extensions": [
       "./alias.ts",
       "./permission-gate.ts",
-      "./prompt-suggestions.ts",
+      "./prompt-suggestions/index.ts",
       "./protected-paths.ts",
-      "./questionnare.ts",
+      "./questionnaire/index.ts",
       "./readmd.ts",
       "./reasoning-tokens.ts",
-      "./ssh.ts",
+      "./ssh/index.ts",
       "./status-line.ts",
-      "./stylish-tools.ts",
+      "./stylish-tools/index.ts",
       "./system-prompt.ts",
       "./thinking-style.ts",
-      "./tool-call-stats.ts",
+      "./tool-call-stats/index.ts",
       "./tool-set/index.ts"
     ]
   },
