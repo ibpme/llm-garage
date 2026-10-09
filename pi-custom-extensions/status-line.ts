@@ -1,4 +1,5 @@
 import { MODE_STATUS_KEY, SSH_STATUS_KEY } from "./contracts/status-keys.ts";
+import { REASONING_TOKENS_LIVE_EVENT, isReasoningTokensLivePayload } from "./contracts/events.ts";
 /**
  * Colorful Status Line Extension
  *
@@ -71,6 +72,13 @@ function thinkingColor(level: string) {
 export default function statusLineExtension(pi: ExtensionAPI) {
   let enabled = true;
   let activeTui: { requestRender(): void } | undefined;
+  let liveReasoning: number | undefined;
+
+  const unsubscribeReasoning = pi.events.on(REASONING_TOKENS_LIVE_EVENT, (data) => {
+    if (!isReasoningTokensLivePayload(data)) return;
+    liveReasoning = data.tokens;
+    activeTui?.requestRender();
+  });
 
   function install(ctx: ExtensionContext) {
     ctx.ui.setFooter((tui, theme, footerData) => {
@@ -96,18 +104,12 @@ export default function statusLineExtension(pi: ExtensionAPI) {
         },
         invalidate() {},
         render(width: number): string[] {
-          let input = 0,
-            output = 0,
-            cacheRead = 0,
-            cacheWrite = 0,
-            cost = 0;
+          let cost = 0;
+          let lastUsage: AssistantMessage["usage"] | undefined;
           for (const e of ctx.sessionManager.getBranch()) {
             if (e.type === "message" && e.message.role === "assistant") {
               const m = e.message as AssistantMessage;
-              input += m.usage.input;
-              output += m.usage.output;
-              cacheRead += m.usage.cacheRead;
-              cacheWrite += m.usage.cacheWrite;
+              lastUsage = m.usage;
               cost += m.usage.cost.total;
             }
           }
@@ -142,14 +144,14 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           // --- Line 2: token stats + context bar + model ---
           const statParts: string[] = [];
-          if (input)
-            statParts.push(theme.fg("accent", `↑${formatTokens(input)}`));
-          if (output)
-            statParts.push(theme.fg("success", `↓${formatTokens(output)}`));
-          if (cacheRead)
-            statParts.push(theme.fg("muted", `R${formatTokens(cacheRead)}`));
-          if (cacheWrite)
-            statParts.push(theme.fg("muted", `W${formatTokens(cacheWrite)}`));
+          if (lastUsage?.input)
+            statParts.push(theme.fg("accent", `↑${formatTokens(lastUsage.input)}`));
+          if (lastUsage?.output)
+            statParts.push(theme.fg("success", `↓${formatTokens(lastUsage.output)}`));
+          if (lastUsage?.cacheRead)
+            statParts.push(theme.fg("muted", `R${formatTokens(lastUsage.cacheRead)}`));
+          if (lastUsage?.cacheWrite)
+            statParts.push(theme.fg("muted", `W${formatTokens(lastUsage.cacheWrite)}`));
 
           const agentStats = extensionStatuses.get("agent-stats");
           if (agentStats) statParts.push(sanitizeStatus(agentStats));
@@ -183,7 +185,13 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           );
 
           const reasoningStatus = extensionStatuses.get("reasoning-tokens");
-          if (reasoningStatus) statParts.push(sanitizeStatus(reasoningStatus));
+          if (reasoningStatus) {
+            const latestTokens = liveReasoning ?? lastUsage?.reasoning;
+            const latestReasoning = latestTokens === undefined
+              ? ""
+              : theme.fg("dim", ` (+${formatTokens(latestTokens)})`);
+            statParts.push(sanitizeStatus(reasoningStatus) + latestReasoning);
+          }
 
           const tools = toolStatuses(pi, theme);
           lastToolStatus = JSON.stringify(tools);
@@ -256,6 +264,15 @@ export default function statusLineExtension(pi: ExtensionAPI) {
   function uninstall(ctx: ExtensionContext) {
     ctx.ui.setFooter(undefined);
   }
+
+  pi.on("turn_start", async () => {
+    liveReasoning = undefined;
+    activeTui?.requestRender();
+  });
+
+  pi.on("session_shutdown", async () => {
+    unsubscribeReasoning();
+  });
 
   pi.on("model_select", async () => {
     activeTui?.requestRender();
