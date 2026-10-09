@@ -58,12 +58,15 @@ function formatCost(cost: number): string {
   return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
 }
 
-function formatUsageLine(usage: CycleUsage): string {
-  return (
-    `in ${formatTokens(usage.input)} · cache read ${formatTokens(usage.cacheRead)} · ` +
-    `cache write ${formatTokens(usage.cacheWrite)} · total ${formatTokens(usage.totalTokens)} · ` +
-    `cost ${formatCost(usage.costTotal)}`
-  );
+function formatUsageLine(usage: CycleUsage, theme: Theme): string {
+  const sep = theme.fg("dim", " · ");
+  return [
+    `${theme.fg("dim", "in ")}${theme.fg("accent", formatTokens(usage.input))}`,
+    `${theme.fg("dim", "cache read ")}${theme.fg("muted", formatTokens(usage.cacheRead))}`,
+    `${theme.fg("dim", "cache write ")}${theme.fg("muted", formatTokens(usage.cacheWrite))}`,
+    `${theme.fg("dim", "total ")}${theme.fg("text", formatTokens(usage.totalTokens))}`,
+    `${theme.fg("dim", "cost ")}${theme.fg("warning", formatCost(usage.costTotal))}`,
+  ].join(sep);
 }
 
 function percentage(part: number, whole: number): string {
@@ -130,10 +133,10 @@ export function formatDetail(
   lines.push(`  Tool calls:           ${theme.fg("accent", `${totalToolCalls(toolStats)}`)}`);
   const usage = sumUsage(cycles);
   lines.push(`  Input tokens:         ${theme.fg("accent", formatTokens(usage.input))}`);
-  lines.push(`  Output tokens:        ${theme.fg("accent", formatTokens(outputTokens))}`);
-  lines.push(`  Cache read/write:     ${theme.fg("accent", formatTokens(usage.cacheRead))} / ${theme.fg("accent", formatTokens(usage.cacheWrite))}`);
-  lines.push(`  Total tokens:         ${theme.fg("accent", formatTokens(usage.totalTokens))}`);
-  lines.push(`  Cost:                 ${theme.fg("accent", formatCost(usage.costTotal))}`);
+  lines.push(`  Output tokens:        ${theme.fg("success", formatTokens(outputTokens))}`);
+  lines.push(`  Cache read/write:     ${theme.fg("muted", formatTokens(usage.cacheRead))} / ${theme.fg("muted", formatTokens(usage.cacheWrite))}`);
+  lines.push(`  Total tokens:         ${theme.fg("text", formatTokens(usage.totalTokens))}`);
+  lines.push(`  Cost:                 ${theme.fg("warning", formatCost(usage.costTotal))}`);
   lines.push(`  Weighted throughput:  ${theme.fg("success", formatRate(weightedTps))}`);
   lines.push(
     `  TTFT avg/min/max:     ${theme.fg("text", formatDuration(averageTtft))} / ` +
@@ -183,11 +186,13 @@ export function formatDetail(
       theme.fg("dim", ` · ${model}${cycle.stopReason ? ` · ${cycle.stopReason}` : ""}`),
     );
     lines.push(
-      `  ${formatTokens(cycle.outputTokens)} output · ${formatRate(cycleTps(cycle))} · ` +
-      `TTFT ${formatDuration(cycle.ttftMs)} · total ${formatDuration(cycle.elapsedMs)}`,
+      `  ${theme.fg("success", `${formatTokens(cycle.outputTokens)} output`)}${theme.fg("dim", " · ")}` +
+      `${theme.fg("success", formatRate(cycleTps(cycle)))}${theme.fg("dim", " · TTFT ")}` +
+      `${theme.fg("accent", formatDuration(cycle.ttftMs))}${theme.fg("dim", " · total ")}` +
+      `${theme.fg("text", formatDuration(cycle.elapsedMs))}`,
     );
     if (cycle.usage) {
-      lines.push(`  ${formatUsageLine(cycle.usage)}`);
+      lines.push(`  ${formatUsageLine(cycle.usage, theme)}`);
     }
     lines.push(
       `  generation ${formatDuration(cycle.generationMs)} · tools ${formatDuration(cycle.toolWallMs)} wall / ` +
@@ -197,9 +202,16 @@ export function formatDetail(
       lines.push(theme.fg("warning", `  provider attempts: ${cycle.providerAttempts}`));
     }
     if (cycle.tools.length > 0) {
-      const tools = cycle.tools
-        .map((tool) => `${tool.name} ${formatDuration(tool.durationMs)}${tool.isError ? " error" : ""}`)
-        .join(" · ");
+      const toolCounts = new Map<string, { count: number; errors: number }>();
+      for (const tool of cycle.tools) {
+        const stat = toolCounts.get(tool.name) ?? { count: 0, errors: 0 };
+        stat.count++;
+        if (tool.isError) stat.errors++;
+        toolCounts.set(tool.name, stat);
+      }
+      const tools = Array.from(toolCounts, ([name, stat]) =>
+        `${name} ×${stat.count}${stat.errors > 0 ? ` (${stat.errors} ${stat.errors === 1 ? "error" : "errors"})` : ""}`,
+      ).join(" · ");
       lines.push(`  tools: ${tools}`);
     }
   });
