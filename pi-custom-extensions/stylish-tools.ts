@@ -47,7 +47,9 @@ import {
   createReadTool,
   createWriteTool,
   defineTool,
+  getShellConfig,
   keyHint,
+  type BashToolOptions,
   type BashOperations,
   type BashToolDetails,
   type EditOperations,
@@ -65,6 +67,8 @@ import {
   type WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import { type Component, Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 
 export type IndicatorColor = "borderAccent" | "success" | "warning" | "error";
 export type Status = "running" | "success" | "error" | "aborted" | "timeout";
@@ -389,29 +393,42 @@ export interface StylishToolOptions<Ops> {
 export function createStylishBashTool(
   cwd: string,
   timers: Set<NodeJS.Timeout>,
-  opts: StylishToolOptions<BashOperations> = {},
+  opts: StylishToolOptions<BashOperations> & {
+    getBashOptions?: () => Pick<BashToolOptions, "shellPath" | "commandPrefix">;
+  } = {},
 ) {
-  const localTool = createBashTool(cwd);
   const metadata = createBashToolDefinition(cwd);
   const getOps = opts.getOperations ?? (() => readOperationsOverride().bash);
   const getTag = opts.getTag ?? (() => readOperationsOverride().tag);
+  const getBashOptions = () => {
+    const options = opts.getBashOptions?.() ?? {};
+    const shellPath = options.shellPath?.startsWith("~/")
+      ? join(homedir(), options.shellPath.slice(2))
+      : options.shellPath;
+    return { ...options, shellPath };
+  };
+  const getLabel = () => {
+    if (getOps() || opts.requireOperationsError) return "bash";
+    const { shellPath } = getBashOptions();
+    const shellName = basename(getShellConfig(shellPath).shell).replace(/\.exe$/i, "");
+    return shellName === "bash" ? "bash" : `bash (${shellName})`;
+  };
 
   return defineTool({
     name: opts.name ?? "bash",
-    label: metadata.label,
+    get label() { return getLabel(); },
     description: opts.extraDescription ? `${opts.extraDescription}\n\n${metadata.description}` : metadata.description,
     promptSnippet: opts.promptSnippet ?? metadata.promptSnippet,
     promptGuidelines: metadata.promptGuidelines,
     parameters: metadata.parameters,
     renderShell: "self",
 
-    async execute(toolCallId, params, signal, onUpdate) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       const ops = getOps();
-      if (!ops) {
-        if (opts.requireOperationsError) throw new Error(opts.requireOperationsError);
-        return localTool.execute(toolCallId, params, signal, onUpdate);
-      }
-      return createBashTool(cwd, { operations: ops }).execute(toolCallId, params, signal, onUpdate);
+      if (!ops && opts.requireOperationsError) throw new Error(opts.requireOperationsError);
+      // Local startup files must not be injected into remote/custom operations.
+      const options = ops ? { operations: ops } : getBashOptions();
+      return createBashTool(ctx.cwd, options).execute(toolCallId, params, signal, onUpdate, ctx);
     },
 
     renderCall(args, theme, context) {
@@ -419,7 +436,7 @@ export function createStylishBashTool(
       const command = String(args.command ?? "");
       const tag = renderTag(theme, getTag());
       const text =
-        theme.fg("toolTitle", theme.bold("$ bash")) + tag + " " + theme.fg("accent", command);
+        theme.fg("toolTitle", theme.bold(`$ ${getLabel()}`)) + tag + " " + theme.fg("accent", command);
       return new Text(text, 0, 0);
     },
 
@@ -448,7 +465,7 @@ export function createStylishBashTool(
 
       const body = capLines(outputLines.length ? outputLines : [theme.fg("dim", "(no output)")], theme);
       const footer = formatStatusLine(theme, status, state, extras, expanded);
-      return new IndicatorBlock(tagLabel("bash", tag), theme, status, body, footer);
+      return new IndicatorBlock(tagLabel(getLabel(), tag), theme, status, body, footer);
     },
   });
 }
@@ -857,7 +874,12 @@ export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const timers = new Set<NodeJS.Timeout>();
 
-  pi.registerTool(createStylishBashTool(cwd, timers));
+  pi.registerTool(createStylishBashTool(cwd, timers, {
+    getBashOptions: () => {
+      const settings = pi.getSettings();
+      return { shellPath: settings.shellPath, commandPrefix: settings.shellCommandPrefix };
+    },
+  }));
   pi.registerTool(createStylishReadTool(cwd, timers));
   pi.registerTool(createStylishEditTool(cwd, timers));
   pi.registerTool(createStylishWriteTool(cwd, timers));
