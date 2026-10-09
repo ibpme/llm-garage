@@ -7,7 +7,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { openPager, textSource } from "../shared/pager.ts";
 import {
+  addUsage,
   computeToolStats,
+  emptyUsage,
   ENTRY_TYPE,
   mergedIntervalDuration,
   now,
@@ -21,6 +23,12 @@ const STATUS_ID = "agent-stats";
 const LEGACY_STATUS_ID = "tool-calls";
 
 const STATUS_REFRESH_MS = 250;
+
+function recordAssistantUsage(cycle: ActiveCycle, message: AssistantMessage): void {
+  if (cycle.countedAssistantTimestamps.has(message.timestamp)) return;
+  cycle.countedAssistantTimestamps.add(message.timestamp);
+  addUsage(cycle.usage, message.usage);
+}
 
 export default function agentStatsExtension(pi: ExtensionAPI) {
   let activeCycle: ActiveCycle | undefined;
@@ -87,6 +95,8 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
       providerAttempts: 0,
       tools: [],
       activeTools: new Map(),
+      usage: emptyUsage(),
+      countedAssistantTimestamps: new Set(),
     };
     refreshStatus(ctx);
     startLiveTimer(ctx);
@@ -138,6 +148,7 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
   pi.on("message_end", async (event, _ctx) => {
     if (!activeCycle || event.message.role !== "assistant") return;
     activeCycle.generationEndedAt ??= now();
+    recordAssistantUsage(activeCycle, event.message as AssistantMessage);
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
@@ -187,6 +198,7 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
     activeCycle.activeTools.clear();
 
     const assistant = event.message.role === "assistant" ? (event.message as AssistantMessage) : undefined;
+    if (assistant) recordAssistantUsage(activeCycle, assistant);
     const elapsedMs = endedAt - activeCycle.startedAt;
     const generationMs =
       activeCycle.firstGeneratedAt !== undefined && activeCycle.generationEndedAt !== undefined
@@ -208,7 +220,8 @@ export default function agentStatsExtension(pi: ExtensionAPI) {
       model: assistant?.responseModel ?? assistant?.model,
       stopReason: assistant?.stopReason,
       providerAttempts: activeCycle.providerAttempts,
-      outputTokens: assistant?.usage.output ?? 0,
+      outputTokens: activeCycle.usage.output,
+      usage: activeCycle.usage,
       ttftMs,
       generationMs,
       elapsedMs,

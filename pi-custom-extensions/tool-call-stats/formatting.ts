@@ -2,8 +2,8 @@ import type {
   ExtensionContext,
   Theme
 } from "@earendil-works/pi-coding-agent";
-import { aggregateToolTimings, cycleTps, totalToolCalls } from "./accounting.ts";
-import type { CyclePhase, PersistedCycle, ToolStat } from "./contracts.ts";
+import { aggregateToolTimings, cycleTps, sumUsage, totalToolCalls } from "./accounting.ts";
+import type { CycleUsage, CyclePhase, PersistedCycle, ToolStat } from "./contracts.ts";
 
 function formatDuration(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms)) return "n/a";
@@ -51,6 +51,19 @@ export function formatLiveTokens(tokens: number): string {
   if (tokens < 1000) return `${tokens}`;
   if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}k`;
   return `${(tokens / 1_000_000).toFixed(2)}M`;
+}
+
+function formatCost(cost: number): string {
+  if (cost === 0) return "$0";
+  return cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
+}
+
+function formatUsageLine(usage: CycleUsage): string {
+  return (
+    `in ${formatTokens(usage.input)} · cache read ${formatTokens(usage.cacheRead)} · ` +
+    `cache write ${formatTokens(usage.cacheWrite)} · total ${formatTokens(usage.totalTokens)} · ` +
+    `cost ${formatCost(usage.costTotal)}`
+  );
 }
 
 function percentage(part: number, whole: number): string {
@@ -115,7 +128,12 @@ export function formatDetail(
   lines.push(theme.bold(theme.fg("accent", "Conversation summary")));
   lines.push(`  Tracked model cycles: ${theme.fg("accent", `${cycles.length}`)}`);
   lines.push(`  Tool calls:           ${theme.fg("accent", `${totalToolCalls(toolStats)}`)}`);
+  const usage = sumUsage(cycles);
+  lines.push(`  Input tokens:         ${theme.fg("accent", formatTokens(usage.input))}`);
   lines.push(`  Output tokens:        ${theme.fg("accent", formatTokens(outputTokens))}`);
+  lines.push(`  Cache read/write:     ${theme.fg("accent", formatTokens(usage.cacheRead))} / ${theme.fg("accent", formatTokens(usage.cacheWrite))}`);
+  lines.push(`  Total tokens:         ${theme.fg("accent", formatTokens(usage.totalTokens))}`);
+  lines.push(`  Cost:                 ${theme.fg("accent", formatCost(usage.costTotal))}`);
   lines.push(`  Weighted throughput:  ${theme.fg("success", formatRate(weightedTps))}`);
   lines.push(
     `  TTFT avg/min/max:     ${theme.fg("text", formatDuration(averageTtft))} / ` +
@@ -168,6 +186,9 @@ export function formatDetail(
       `  ${formatTokens(cycle.outputTokens)} output · ${formatRate(cycleTps(cycle))} · ` +
       `TTFT ${formatDuration(cycle.ttftMs)} · total ${formatDuration(cycle.elapsedMs)}`,
     );
+    if (cycle.usage) {
+      lines.push(`  ${formatUsageLine(cycle.usage)}`);
+    }
     lines.push(
       `  generation ${formatDuration(cycle.generationMs)} · tools ${formatDuration(cycle.toolWallMs)} wall / ` +
       `${formatDuration(cycle.toolSumMs)} sum · overhead ${formatDuration(cycle.overheadMs)}`,

@@ -15,6 +15,15 @@ interface ToolTiming {
   isError: boolean;
 }
 
+export interface CycleUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  costTotal: number;
+}
+
 export interface PersistedCycle {
   version: typeof ENTRY_VERSION;
   turnIndex: number;
@@ -24,6 +33,7 @@ export interface PersistedCycle {
   stopReason?: string;
   providerAttempts: number;
   outputTokens: number;
+  usage?: CycleUsage;
   ttftMs?: number;
   generationMs?: number;
   elapsedMs: number;
@@ -53,6 +63,8 @@ export interface ActiveCycle {
   tools: ToolTiming[];
   activeTools: Map<string, ActiveTool>;
   reasoningTokens?: number;
+  usage: CycleUsage;
+  countedAssistantTimestamps: Set<number>;
 }
 
 export interface ToolTimingStat extends ToolStat {

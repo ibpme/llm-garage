@@ -3,9 +3,36 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type {
   SessionEntry
 } from "@earendil-works/pi-coding-agent";
-import type { PersistedCycle, ToolStat, ToolTimingStat } from "./contracts.ts";
+import type { CycleUsage, PersistedCycle, ToolStat, ToolTimingStat } from "./contracts.ts";
 
 export const ENTRY_TYPE = "agent-stats-cycle";
+
+export function emptyUsage(): CycleUsage {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, costTotal: 0 };
+}
+
+export function addUsage(target: CycleUsage, usage: AssistantMessage["usage"]): void {
+  target.input += usage.input;
+  target.output += usage.output;
+  target.cacheRead += usage.cacheRead;
+  target.cacheWrite += usage.cacheWrite;
+  target.totalTokens += usage.totalTokens;
+  target.costTotal += usage.cost.total;
+}
+
+export function sumUsage(cycles: readonly PersistedCycle[]): CycleUsage {
+  const total = emptyUsage();
+  for (const cycle of cycles) {
+    if (!cycle.usage) continue;
+    total.input += cycle.usage.input;
+    total.output += cycle.usage.output;
+    total.cacheRead += cycle.usage.cacheRead;
+    total.cacheWrite += cycle.usage.cacheWrite;
+    total.totalTokens += cycle.usage.totalTokens;
+    total.costTotal += cycle.usage.costTotal;
+  }
+  return total;
+}
 
 export function now(): number {
   return performance.now();
