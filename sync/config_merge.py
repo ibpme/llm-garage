@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Merge or remove a single MCP server entry inside a native tool config
 file, without disturbing the rest of that file -- unlike skills/subagents/
 prompts, files like ~/.claude.json, ~/.codex/config.toml and
@@ -8,10 +12,14 @@ servers) owned by the tool itself, so they can't be symlinked wholesale.
 Also supports generic JSON key set/remove for top-level config keys
 (e.g. pi's settings.json).
 
-Used by sync-*.sh / unsync-*.sh after generate.py has produced the
-per-target fragment under build/<target>/mcp/<name>.json|toml.
+Pi MCP sync reads the tracked native mcp/pi-mcp.json directly. Server
+connection settings are authoritative, while existing enabled, exposure, and
+toolExposure preferences remain local. Unrelated servers and top-level keys
+are preserved.
 
 Usage:
+  config_merge.py json-sync-servers   <config_path> <source_json_path>
+  config_merge.py json-unsync-servers <config_path> <source_json_path>
   config_merge.py json-merge      <config_path> <config_key> <name> <entry_json_path>
   config_merge.py json-remove     <config_path> <config_key> <name>
   config_merge.py json-set        <config_path> <key> <json_value>
@@ -79,6 +87,43 @@ def write_json(path, config):
     # ensure_ascii=False so existing non-ASCII content (project paths, etc.)
     # isn't rewritten into \uXXXX escapes on every unrelated key we touch.
     _atomic_write(path, json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+
+
+def json_sync_servers(config_path: str, source_path: str, *, remove: bool = False) -> None:
+    source = load_json(source_path)
+    if not isinstance(source, dict) or not isinstance(source.get("mcpServers"), dict):
+        sys.exit(f"error: {source_path} must contain an mcpServers object")
+    servers = source["mcpServers"]
+    if any(not isinstance(entry, dict) for entry in servers.values()):
+        sys.exit(f"error: {source_path} server entries must be objects")
+
+    config = load_json(config_path)
+    if not isinstance(config, dict):
+        sys.exit(f"error: {config_path} top level is not a JSON object")
+    bucket = config.get("mcpServers", {})
+    if not isinstance(bucket, dict):
+        sys.exit(f"error: {config_path} mcpServers must be an object")
+    updated = dict(bucket)
+    if remove:
+        for name in servers:
+            updated.pop(name, None)
+    else:
+        for name, entry in servers.items():
+            existing = bucket.get(name, {})
+            if not isinstance(existing, dict):
+                sys.exit(f"error: {config_path} server {name!r} must be an object")
+            merged = dict(entry)
+            # Presence matters: False and an empty toolExposure are local choices.
+            for key in ("enabled", "exposure", "toolExposure"):
+                if key in existing:
+                    merged[key] = existing[key]
+            updated[name] = merged
+    if updated == bucket:
+        return
+    _backup_once(config_path)
+    config["mcpServers"] = updated
+    write_json(config_path, config)
+    print(f"{'removed' if remove else 'synced'} tracked MCP servers {'from' if remove else 'into'} {config_path}")
 
 
 def json_merge(config_path, config_key, name, entry_path):
@@ -231,7 +276,10 @@ def main():
         sys.exit(__doc__)
     cmd = args[0]
     try:
-        if cmd == "json-merge":
+        if cmd in ("json-sync-servers", "json-unsync-servers"):
+            _, config_path, source_path = args
+            json_sync_servers(config_path, source_path, remove=cmd == "json-unsync-servers")
+        elif cmd == "json-merge":
             _, config_path, config_key, name, entry_path = args
             json_merge(config_path, config_key, name, entry_path)
         elif cmd == "json-remove":

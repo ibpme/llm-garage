@@ -30,7 +30,7 @@ something like `.../llm-garage/context/GLOBAL.md` or
 `.../llm-garage/skills/<name>/SKILL.md`) confirms the repo and its
 location. If none of the relevant files are symlinks yet, fall back to
 searching common locations (`~/Documents/Code/`, `~/code/`, `~/dev/`,
-`~/projects/`) for a directory containing `sync/generate.py` and
+`~/projects/`) for a directory containing `sync/sync-all.sh` and
 `context/GLOBAL.md`.
 
 ## Step 2: Before editing anything at the synced location
@@ -44,11 +44,9 @@ Stop and tell the user:
 - It will **not sync** to the other coding agents (Claude Code, Codex CLI,
   OpenCode, pi), which defeats the purpose of having a single source-of-truth
   repo.
-- Note that `prompts/` and `subagents/` in the repo aren't plain symlinks --
-  they're generated per-tool by `sync/generate.py` into `build/`, then
-  symlinked from there. So even canonical edits to those need a
-  `./sync/sync-all.sh` re-run to take effect; editing the generated `build/`
-  output directly is also non-canonical and gets overwritten on next sync.
+- Global memory, skills, and prompts are direct symlinks to the repo.
+  Edits to existing source files take effect immediately; adding or removing
+  entries requires a `./sync/sync-all.sh` re-run.
 
 Ask the user how they'd like to proceed (edit the canonical source in the
 repo and resync, or make a deliberate one-off local edit knowing it won't

@@ -17,7 +17,7 @@ Resolve symlinks for the active tool's config to find the repo, e.g.
 `readlink ~/.claude/CLAUDE.md` (or the equivalent `AGENTS.md`/skills/commands
 path for whichever tool is currently driving). If nothing is symlinked yet,
 fall back to searching common locations (`~/Documents/Code/`, `~/code/`,
-`~/dev/`, `~/projects/`) for a directory containing `sync/generate.py` and
+`~/dev/`, `~/projects/`) for a directory containing `sync/sync-all.sh` and
 `context/GLOBAL.md`. If the repo can't be found at all, report that and stop.
 
 ## Step 2: Check each category for the active tool
@@ -33,12 +33,12 @@ for the active tool, check:
   files/dirs (local-only or drifted), and any skills present in the repo but
   missing entirely from the tool's skills dir (not synced).
 - **Commands/prompts**: for each file under the tool's commands/prompts
-  directory, is it a symlink into the repo's generated `build/<target>/...`
-  output (which in turn comes from `prompts/<name>.md`)? Flag plain files or
+  directory, is it a symlink directly into `prompts/<name>.md` in the repo?
+  Flag legacy `build/` links, plain files, or
   broken/missing symlinks the same way.
 - **Subagents, MCP servers, project-level memory**: ignore these. They are
-  not synced from the repo, and non-canonical/local-only config for them is
-  expected and fine.
+  outside canonical sync (pi MCP defaults may be merged opt-in), and
+  non-canonical/local-only config for them is expected and fine.
 
 ## Step 3: Report back -- do not fix anything
 

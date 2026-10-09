@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Regenerates build/ and re-links everything. MCP servers are skipped by
-# default -- setting them up is a coding agent's own responsibility, not
-# this repo's. Pass --with-mcp to also sync this repo's mcp/ specs.
+# Links shared config and prompts directly. Pass --with-mcp to also
+# merge the tracked native pi MCP servers.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-python3 "$DIR/generate.py"
 
 for target in claude codex opencode pi; do
   echo "=== $target ==="

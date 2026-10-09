@@ -9,14 +9,10 @@ require_macos_or_linux
 TARGET="$HOME/.pi/agent"
 
 link_one "$REPO_ROOT/context/GLOBAL.md" "$TARGET/AGENTS.md"
-# Subagent syncing deferred -- skills now cover what subagents were used
-# for here. subagents/ + generate.py still work; re-add this line to
-# resume syncing them.
-# link_dir_contents "$REPO_ROOT/build/pi/agents" "$TARGET/agents"
-link_dir_contents "$REPO_ROOT/build/pi/prompts" "$TARGET/prompts"
+link_dir_contents "$REPO_ROOT/prompts" "$TARGET/prompts"
 # Ensure pi's settings.json points at the same skill directories that
 # sync-claude.sh / sync-codex.sh populate.
-python3 "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.claude/skills","~/.codex/skills"]'
+uv run "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.claude/skills","~/.codex/skills"]'
 
 # Symlink custom extensions from this repo into pi's extensions dir
 # (individual entry links, so pi-specific local extensions stay untouched).
@@ -35,17 +31,9 @@ fi
 # this as a single whole file, not a directory of entries).
 link_one "$REPO_ROOT/pi-custom-keybinds/keybindings.json" "$TARGET/keybindings.json"
 
-# MCP servers are optional and off by default -- setting them up is a
-# coding agent's own responsibility, not this repo's. Pass --with-mcp to
-# also merge this repo's mcp/ specs into mcp.json (a file pi may also hold
-# project-scoped or pi-specific state in -- merged in rather than
-# symlinking the whole file).
-if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/build/pi/mcp" ]; then
-  for entry in "$REPO_ROOT/build/pi/mcp"/*.json; do
-    [ -e "$entry" ] || continue
-    name="$(basename "$entry" .json)"
-    python3 "$DIR/config_merge.py" json-merge "$TARGET/mcp.json" mcpServers "$name" "$entry"
-  done
+# Merge native server entries only; pi owns the rest of its mutable config.
+if has_flag --with-mcp "$@"; then
+  uv run "$DIR/config_merge.py" json-sync-servers "$TARGET/mcp.json" "$REPO_ROOT/mcp/pi-mcp.json"
 fi
 
 echo "pi: sync complete"

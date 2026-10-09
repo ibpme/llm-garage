@@ -10,16 +10,12 @@ config location.
 ```
 context/GLOBAL.md        canonical global instructions (-> CLAUDE.md / AGENTS.md everywhere)
 skills/<name>/SKILL.md    canonical skills (same SKILL.md format across all four tools)
-subagents/<name>/         non-canonical -- deferred, not synced into any live tool config (see below)
-  spec.yaml               description, tools, per-target model map, optional thinking/max_turns
-  prompt.md               the subagent's system prompt body
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
-mcp/<name>/spec.yaml      non-canonical MCP server spec (stdio command + args) -- opt-in, see below
+mcp/pi-mcp.json           native pi MCP server defaults -- opt-in, see below
 pi-custom-extensions/      pi-specific TypeScript extensions (hotkeyed mode toggle, status line, etc.)
 pi-custom-config/           tracked defaults for mutable pi extension configuration
 pi-custom-keybinds/         pi-specific keybindings.json override
 sync/
-  generate.py             subagents/ + prompts/ + mcp/ -> build/<target>/... (native format per tool)
   lib.sh                  shared symlink + backup helpers
   config_merge.py         merges/removes config entries (MCP servers, top-level JSON keys) in tool native config files
   refresh-context7.py     pulls Context7's skill/rule content from upstream, diffs against the repo
@@ -27,48 +23,43 @@ sync/
   sync-codex.sh
   sync-opencode.sh
   sync-pi.sh
-  sync-all.sh             regenerate + sync everything
-build/                    generated output (gitignored, rebuilt every run)
+  sync-all.sh             link shared config + optionally merge pi MCP defaults
 ```
 
-## Why generate instead of pure symlink
+## Sync strategy
 
-Skills and context files are byte-identical across all four tools, so those
-are plain symlinks. Subagents are not: each tool names models differently
-(`sonnet` vs `anthropic/claude-opus-4-6` vs a Codex-specific id vs its own
-TOML schema), so a subagent's canonical spec is translated per target by
-`generate.py`, and the *generated* file is what gets symlinked into place.
-Prompts/commands are close enough across tools (same `$ARGUMENTS`/`$1`
-placeholder body) that they're passed through with only minor frontmatter
-differences.
+Skills, context, and prompts are linked directly from this repo; no generation
+step is needed. Editing those source files takes effect immediately. Re-run
+sync when adding or removing entries. Subagent syncing is not managed here.
 
-MCP servers (`mcp/`) are **opt-in and off by default** -- setting up MCP
-servers is a coding agent's own responsibility, not this repo's, so
-`sync-*.sh` skip them unless you pass `--with-mcp`. When you do opt in,
-their native config files (`~/.claude.json`, `~/.codex/config.toml`,
-`~/.pi/agent/mcp.json`) also hold each tool's own unrelated state -- auth,
-project lists, other servers not managed by this repo -- so even the
-*generated* fragment can't be symlinked into place. Instead
-`sync-claude.sh`/`sync-codex.sh`/`sync-pi.sh` call `config_merge.py` to upsert
-just that one server's entry/table, leaving the rest of the file untouched
-(with a one-time backup on first write, see `config_merge.py`'s
-`_backup_once`). `sync-pi.sh` also uses it to set the `skills` key in
-`~/.pi/agent/settings.json` so pi shares the same skill directories as
-Claude Code and Codex. `unsync-*.sh --with-mcp` reverses this by deleting just
-that entry. OpenCode isn't included in `mcp/` sync at all -- MCP servers
-there are configured through its own plugin ecosystem.
+MCP servers are **opt-in and off by default**. Currently only pi MCP servers
+are managed: `sync-pi.sh --with-mcp` reads `mcp/pi-mcp.json` and merges its
+`mcpServers` entries into `~/.pi/agent/mcp.json`. No shared YAML spec or
+per-tool translation is involved. Claude Code, Codex, and OpenCode MCP
+configuration is left to each tool.
 
-Practical effect: after editing anything under `subagents/`, `prompts/`,
-or `mcp/`, re-run sync (regeneration isn't automatic on `git pull`):
+Tracked connection settings (URL, command, args, headers, environment, etc.)
+are authoritative. Each computer keeps its existing `enabled`, `exposure`, and
+`toolExposure` preferences, including changes made through pi's `/mcp` UI.
+Tracked preference values are used only when that field is absent locally;
+`toolExposure` is preserved as a whole map, not merged per tool. Unrelated
+servers and top-level settings are preserved. The live file is not symlinked,
+so pi's runtime changes do not modify the repository. A one-time backup is
+made before changing an existing config file.
 
-```
-git pull
-./sync/sync-all.sh              # skills, memory, commands/prompts, subagents
-./sync/sync-all.sh --with-mcp   # ...plus MCP servers under mcp/
+Environment references such as `${EXA_API_KEY}` are copied literally and
+resolved by pi at runtime. OAuth credentials remain in pi's own local storage,
+not in this repo. Only user-level configuration is synced; project `.pi/mcp.json`
+files are untouched.
+
+```bash
+./sync/sync-all.sh              # skills, memory, prompts, pi extensions/config
+./sync/sync-all.sh --with-mcp   # ...plus tracked native pi MCP servers
+./sync/sync-pi.sh --with-mcp    # pi only
 ```
 
-Editing `context/GLOBAL.md` or `skills/` takes effect immediately since
-those are direct symlinks -- no regeneration step.
+`sync-pi.sh` also sets the `skills` key in `~/.pi/agent/settings.json` so pi
+shares Claude Code and Codex's skill directories.
 
 `sync-pi.sh` also installs tracked defaults from `pi-custom-config/` as
 ordinary files when their live config does not exist. This is intentional for
@@ -122,39 +113,39 @@ This removes every symlink `sync-*.sh` created and restores whatever file
 or directory was backed up in its place (matched by the same
 `.pre-llm-garage.<timestamp>` suffix `sync-*.sh` creates, newest wins). It
 only ever touches symlinks that point into this repo -- anything else at
-that path is left untouched. `unsync-all.sh` also deletes `build/`, since
-it's just generated output. Safe to run repeatedly; a second run is a
+that path is left untouched. Safe to run repeatedly; a second run is a
 no-op once everything is already unsynced.
 
-MCP server entries aren't symlinks, so they're reversed separately: run
-`unsync-*.sh --with-mcp` (matching however you synced) to also remove this
-repo's entries from the relevant native config file (`~/.claude.json`,
-`~/.codex/config.toml`, `~/.pi/agent/mcp.json`) via `config_merge.py`, leaving
-everything else in those files untouched. Without `--with-mcp`, unsync
-leaves MCP entries alone. `unsync-pi.sh` additionally removes the `skills`
-key it set in `~/.pi/agent/settings.json` during sync.
+MCP server entries aren't symlinks, so they're reversed separately:
+`unsync-pi.sh --with-mcp` (or `unsync-all.sh --with-mcp`) removes only the
+server names currently listed in `mcp/pi-mcp.json`, preserving unrelated
+servers and top-level settings. It does not restore earlier same-name entries;
+use the one-time backup for manual recovery. A server removed or renamed in
+the tracked config must be removed manually from the live config. Without
+`--with-mcp`, unsync leaves MCP entries alone. `unsync-pi.sh` additionally
+removes the `skills` key it set in `~/.pi/agent/settings.json` during sync.
 
 ## Per-tool targets
 
 | Tool | Context file | Skills | Subagents | Commands/prompts | MCP servers (`--with-mcp` only) |
 |---|---|---|---|---|---|
-| Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/<name>/` | `~/.claude/agents/<name>.md` | `~/.claude/commands/<name>.md` | merged into `~/.claude.json`'s `mcpServers` |
-| Codex CLI | `~/.codex/AGENTS.md` | `~/.codex/skills/<name>/` | `~/.codex/agents/<name>.toml` | `~/.codex/prompts/<name>.md` (deprecated upstream -- prefer skills for anything auto-triggered) | merged into `~/.codex/config.toml`'s `[mcp_servers.<name>]` |
-| OpenCode | `~/.config/opencode/AGENTS.md` | `~/.config/opencode/skills/<name>/` | `~/.config/opencode/agents/<name>.md` | `~/.config/opencode/commands/<name>.md` | not managed here (see `mcp/` section below) |
-| pi | `~/.pi/agent/AGENTS.md` | merged into `~/.pi/agent/settings.json`'s `skills` (`~/.claude/skills` + `~/.codex/skills`) | `~/.pi/agent/agents/<name>.md` | `~/.pi/agent/prompts/<name>.md` | merged into `~/.pi/agent/mcp.json`'s `mcpServers` |
+| Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/<name>/` | not managed | `~/.claude/commands/<name>.md` | not managed |
+| Codex CLI | `~/.codex/AGENTS.md` | `~/.codex/skills/<name>/` | not managed | `~/.codex/prompts/<name>.md` (deprecated upstream -- prefer skills for anything auto-triggered) | not managed |
+| OpenCode | `~/.config/opencode/AGENTS.md` | `~/.config/opencode/skills/<name>/` | not managed | `~/.config/opencode/commands/<name>.md` | not managed |
+| pi | `~/.pi/agent/AGENTS.md` | merged into `~/.pi/agent/settings.json`'s `skills` (`~/.claude/skills` + `~/.codex/skills`) | not managed | `~/.pi/agent/prompts/<name>.md` | merged into `~/.pi/agent/mcp.json`'s `mcpServers` |
 
 ## Setup on a new machine
 
 ```
 git clone <this repo> ~/Documents/Code/llm-garage
 cd ~/Documents/Code/llm-garage
-./sync/sync-all.sh              # skip mcp/ (opt in with --with-mcp, see below)
+./sync/sync-all.sh              # skip MCP (opt in with --with-mcp, see below)
 ```
 
 Any existing file at a target path is renamed aside as
 `<file>.pre-llm-garage.<timestamp>` before the symlink is created --
-nothing is silently overwritten. Requires Python 3 (stdlib only, no pip
-install needed) and bash.
+nothing is silently overwritten. Requires bash and `uv` (the Python helper
+uses only the standard library).
 
 ## Windows
 
@@ -166,88 +157,21 @@ Windows-installed agents won't see them), or write a `sync-*.ps1` variant
 using `New-Item -ItemType SymbolicLink` (requires Developer Mode or admin)
 with a copy-file fallback when symlink creation is denied.
 
-## Adding a new subagent
-
-**Subagents are non-canonical.** Subagent syncing is currently deferred:
-the `link_dir_contents ... agents` line is commented out in each
-`sync/sync-<target>.sh` -- skills now cover most of what subagents were
-used for here. `subagents/` and `generate.py`'s subagent translation still
-work (`build/<target>/agents/` still gets generated), it just isn't linked
-into any live tool config. Uncomment that line per target to resume.
-
-```
-mkdir subagents/my-agent
-$EDITOR subagents/my-agent/spec.yaml   # description, tools, model per target
-$EDITOR subagents/my-agent/prompt.md   # system prompt body
-./sync/sync-all.sh
-```
-
-`spec.yaml` is a deliberately small YAML subset (flat keys, plus two
-nested maps -- `model:` and `mcp_tools:`) parsed by a ~30-line hand-rolled
-parser in `generate.py` -- not a general YAML parser. Keep new specs
-within that shape (see `subagents/subagent-or-skill/spec.yaml` for the
-reference example).
-
-### Tool names: portable vocab vs. raw MCP names
-
-`tools:` (a flat CSV, e.g. `read, grep, bash`) uses a small canonical
-vocabulary that `generate.py` translates per target -- `CLAUDE_TOOL_MAP`
-and `OPENCODE_TOOL_MAP` at the top of the file. Codex has no per-tool
-allow-list at all, so `tools:` is translated into a `sandbox_mode`
-instead (`workspace-write` if `write`/`edit` is present, else
-`read-only` -- see `codex_sandbox_mode()`; `bash` alone doesn't force
-`workspace-write`, since a read-only sandbox still runs shell commands
-for things like grep/find, it just blocks writes).
-
-MCP tool names aren't portable across targets (Claude wants
-`mcp__<server>__<tool>` or a `mcp__<server>__*` wildcard; OpenCode wants
-`<server>_<tool>` or `<server>_*`), so they can't go through the
-canonical vocab. Use the optional `mcp_tools:` nested map instead, with
-one raw, target-specific CSV per key:
-
-```yaml
-mcp_tools:
-  claude: mcp__context7__query-docs, mcp__context7__resolve-library-id
-  opencode: context7_*
-  pi: mcp__context7__query-docs
-```
-
-These bypass all translation and get appended straight into each
-target's tool declaration. **Codex has no per-agent tool or MCP scoping
-at all** -- its custom-agent TOML schema is only
-`name`/`description`/`model_reasoning_effort`/`sandbox_mode`/
-`developer_instructions`; MCP servers are wired up globally in
-`~/.codex/config.toml`, not per role. A `mcp_tools.codex` key is
-accepted but ignored, with a warning at generate time -- there's no
-native mechanism to honor it.
-
 ## Adding a new MCP server
 
-**MCP servers are opt-in.** Setting up MCP servers is a coding agent's own
-responsibility, not this repo's -- `sync-*.sh` never touch them unless you
-explicitly pass `--with-mcp`.
+Edit `mcp/pi-mcp.json` using pi's native `mcpServers` format. It supports
+stdio (`command`, `args`, `env`, `cwd`) and streamable HTTP (`url`, `headers`,
+`oauth`), plus pi-specific `exposure` and `toolExposure`. Keep secrets out of
+tracked files; use environment references instead.
 
+```bash
+$EDITOR mcp/pi-mcp.json
+./sync/sync-pi.sh --with-mcp
 ```
-mkdir mcp/my-server
-$EDITOR mcp/my-server/spec.yaml   # name, command, args (stdio only)
-./sync/sync-all.sh --with-mcp
-```
 
-`spec.yaml` only supports stdio servers (`command` + a space-separated
-`args` string) -- see `mcp/context7/spec.yaml` for the reference example.
-There's no per-target model map here like subagents have; Claude Code and
-pi share one JSON entry shape, and Codex gets the same command/args
-translated into TOML. Add remote (HTTP/SSE) support to `generate.py`'s
-`gen_mcp()` if you need it later.
-
-Optional `auth_env` + `auth_flag` keys let a server take an API key from
-your local shell environment at generate time instead of storing it in
-the repo: if `auth_env`'s named variable is set when you run
-`sync-all.sh`, `generate.py` appends `<auth_flag> <value>` to `args`; if
-unset, the flag is silently omitted (the server just runs unauthenticated
--- this should never be a hard failure, only a capability downgrade). The
-resolved value only ever lands in `build/` (gitignored) and the merged
-live config file on your machine, never in a file this repo tracks.
+Run `/reload` in an existing pi session after syncing, or start a new session.
+Use `/mcp` to inspect connections. MCP configuration for other tools is not
+managed here.
 
 ## Keeping Context7 in sync with upstream
 

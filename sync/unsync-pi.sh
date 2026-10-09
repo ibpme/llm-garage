@@ -15,15 +15,11 @@ unlink_repo_symlinks "$TARGET/extensions"
 unlink_one "$TARGET/keybindings.json"
 
 # Reverse the settings.json skills key we set during sync.
-python3 "$DIR/config_merge.py" json-remove-key "$TARGET/settings.json" skills
+uv run "$DIR/config_merge.py" json-remove-key "$TARGET/settings.json" skills
 
-# Only reverses MCP entries if this repo was synced with --with-mcp in
-# the first place -- see sync-pi.sh.
-if has_flag --with-mcp "$@" && [ -d "$REPO_ROOT/mcp" ]; then
-  for d in "$REPO_ROOT/mcp"/*/; do
-    [ -d "$d" ] || continue
-    python3 "$DIR/config_merge.py" json-remove "$TARGET/mcp.json" mcpServers "$(basename "$d")"
-  done
+# Remove only server names listed in the tracked native config.
+if has_flag --with-mcp "$@"; then
+  uv run "$DIR/config_merge.py" json-unsync-servers "$TARGET/mcp.json" "$REPO_ROOT/mcp/pi-mcp.json"
 fi
 
 echo "pi: unsync complete"
