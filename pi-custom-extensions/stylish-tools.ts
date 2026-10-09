@@ -38,7 +38,6 @@
  *   and an optional tag shown next to the label/status line.
  */
 import {
-  createBashTool,
   createBashToolDefinition,
   createEditTool,
   createFindTool,
@@ -428,7 +427,7 @@ export function createStylishBashTool(
       if (!ops && opts.requireOperationsError) throw new Error(opts.requireOperationsError);
       // Local startup files must not be injected into remote/custom operations.
       const options = ops ? { operations: ops } : getBashOptions();
-      return createBashTool(ctx.cwd, options).execute(toolCallId, params, signal, onUpdate, ctx);
+      return createBashToolDefinition(ctx.cwd, options).execute(toolCallId, params, signal, onUpdate, ctx);
     },
 
     renderCall(args, theme, context) {
