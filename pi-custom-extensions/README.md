@@ -47,6 +47,7 @@ larger features use focused modules:
 | `stylish-tools/` | Registration, tool factories, rendering, operation overrides |
 | `tool-call-stats/` | Event wiring, accounting/persistence, formatting, contracts |
 | `tool-set/` | Registration, instance-owned state, public service/contracts, mode commands/UI |
+| `usage/` | Account quota lookup, provider auth boundaries, response parsing, usage viewer |
 
 An entry point registers a feature; it is **not a reusable library API**. Production
 modules must not import any manifest entry point, including another feature's
@@ -104,6 +105,19 @@ pi -e ./pi-custom-extensions --ssh user@host:/remote/path
 The styled tools delegate execution to Pi's original implementations and share
 rendering between local and remote variants. Expanded results use an indicator
 and gutter rather than boxes; compact previews retain each tool's output caps.
+
+## Account usage
+
+[`usage/`](usage/README.md) adds `/usage` for OpenCode Go and OpenAI. It shows
+account-level quota percentages and reset times, rather than conversation token
+counts. `/usage` checks configured supported providers; `/usage opencode-go`,
+`/usage openai`, and `/usage openai-codex` select one explicitly.
+
+OpenCode Go uses its API-key usage endpoint. Native OpenAI ChatGPT OAuth needs
+a same-account `/login openai-codex` companion for shared-plan quotas; without
+one, it provides usage-page guidance. Ordinary OpenAI API-key usage requires a
+separate admin API and is not implemented. See the feature README for auth
+boundaries, limitations, and maintenance details.
 
 ## Prerequisites
 

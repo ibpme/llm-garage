@@ -33,7 +33,8 @@
       "./system-prompt.ts",
       "./thinking-style.ts",
       "./tool-call-stats/index.ts",
-      "./tool-set/index.ts"
+      "./tool-set/index.ts",
+      "./usage/index.ts"
     ]
   },
   "dependencies": {
