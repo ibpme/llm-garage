@@ -21,6 +21,7 @@
   "pi": {
     "extensions": [
       "./alias.ts",
+      "./loaded-skills/index.ts",
       "./permission-gate.ts",
       "./prompt-suggestions/index.ts",
       "./protected-paths.ts",

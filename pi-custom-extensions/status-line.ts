@@ -1,4 +1,4 @@
-import { MODE_STATUS_KEY, SSH_STATUS_KEY } from "./contracts/status-keys.ts";
+import { LOADED_SKILLS_STATUS_KEY, MODE_STATUS_KEY, SSH_STATUS_KEY } from "./contracts/status-keys.ts";
 import { REASONING_TOKENS_LIVE_EVENT, isReasoningTokensLivePayload } from "./contracts/events.ts";
 /**
  * Colorful Status Line Extension
@@ -245,11 +245,12 @@ export default function statusLineExtension(pi: ExtensionAPI) {
           const lines = [line1, line2];
 
           const rest = Array.from(extensionStatuses.entries())
-            .filter(([key]) => ![SSH_STATUS_KEY, "tools", "mcp-tools", "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
+            .filter(([key]) => ![LOADED_SKILLS_STATUS_KEY, SSH_STATUS_KEY, "tools", "mcp-tools", "reasoning-tokens", "agent-stats", "prompt-suggestions", ...INLINE_STATUS_KEYS].includes(key))
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([, text]) => sanitizeStatus(text));
           {
-            const left = [tools.tools, ...(tools.mcp ? [tools.mcp] : []), ...rest].join(theme.fg("dim", " · "));
+            const skillStatus = extensionStatuses.get(LOADED_SKILLS_STATUS_KEY);
+            const left = [tools.tools, ...(skillStatus ? [sanitizeStatus(skillStatus)] : []), ...(tools.mcp ? [tools.mcp] : []), ...rest].join(theme.fg("dim", " · "));
             lines.push(
               truncateToWidth(left, width, theme.fg("dim", "...")),
             );

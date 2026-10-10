@@ -106,6 +106,24 @@ The styled tools delegate execution to Pi's original implementations and share
 rendering between local and remote variants. Expanded results use an indicator
 and gutter rather than boxes; compact previews retain each tool's output caps.
 
+## Loaded skills
+
+[`loaded-skills/`](loaded-skills/index.ts) shows `skills: tdd, commit` immediately
+beside `tools:` in the custom footer (`skills: none` before any skill is loaded).
+It tracks successful local `read` calls for `SKILL.md` and standalone
+`skills/*.md` files, including reads through codemode, plus `/skill:name`
+expansions. Reads display the directory/file name; explicit commands display the
+skill's declared name. Available skills advertised in the system prompt are not
+counted as loaded.
+
+The list follows the active session branch and is reconstructed on reload,
+resume, tree navigation, and compaction. It means “loaded on this branch,” not a
+guarantee that the original instructions remain verbatim after compaction.
+Failed reads, remote reads, arbitrary Bash file reads, and reads inside delegated
+agents are not counted. With the custom footer disabled, the extension still
+publishes its status to Pi's default footer. Long lists use the footer's existing
+width truncation.
+
 ## Account usage
 
 [`usage/`](usage/README.md) adds `/usage` for OpenCode Go and OpenAI. It shows
