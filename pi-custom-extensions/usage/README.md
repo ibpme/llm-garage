@@ -21,7 +21,9 @@ others.
 Each quota is one line: a severity-colored bar, **used** and **left** percentages,
 and a reset countdown captured at lookup time (the local timestamp is dropped when
 the viewer is narrow). Passed reset times do not imply that
-usage has returned to zero. The TUI opens a scrollable viewer; Esc/q closes it.
+usage has returned to zero. The TUI opens a scrollable viewer immediately with a
+loading line and fills it in when the lookup finishes; Esc/q closes it and cancels
+any pending requests.
 RPC uses a notification, and print/JSON modes use plain console output, following
 the shared pager convention. No report is added to model context or saved.
 

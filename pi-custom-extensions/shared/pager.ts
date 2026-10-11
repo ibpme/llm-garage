@@ -32,6 +32,10 @@ export interface PagerSource {
 	lines(width: number): string[];
 	/** Drop any cached layout; the host is about to re-render from scratch. */
 	invalidate?(): void;
+	/** Called once the viewer is mounted; call `redraw` after content changes asynchronously. */
+	attach?(redraw: () => void): void;
+	/** Called when the viewer closes, before the editor is restored. */
+	detach?(): void;
 }
 
 export interface PagerOptions {
@@ -143,6 +147,7 @@ export async function openPager(
 	}
 
 	await ctx.ui.custom((tui, theme, _kb, done) => {
+		options.source.attach?.(() => tui.requestRender());
 		let allLines: string[] = [];
 		let offset = 0;
 		let viewportLines = 1;
@@ -215,6 +220,7 @@ export async function openPager(
 				const halfPage = Math.max(1, Math.floor(viewportLines / 2));
 
 				if (matchesKey(data, "escape") || data === "q" || data === "Q") {
+					options.source.detach?.();
 					done(undefined);
 					// Ensure the restored editor is painted after custom() releases it.
 					tui.requestRender(true);
