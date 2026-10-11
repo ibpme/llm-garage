@@ -29,6 +29,7 @@
       "./readmd.ts",
       "./reasoning-tokens.ts",
       "./ssh/index.ts",
+      "./stash.ts",
       "./status-line.ts",
       "./stylish-tools/index.ts",
       "./system-prompt.ts",

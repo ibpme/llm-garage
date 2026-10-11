@@ -349,3 +349,18 @@ string or array replaces Shift+Left; `[]` disables the shortcut. Missing or
 malformed configuration falls back to Shift+Left. The extension uses Pi’s
 `getAgentDir()` so custom agent directories are respected. Run `/reload` after
 changing the binding.
+
+### Prompt stash
+
+`stash.ts` adds **Ctrl+S** in the main editor. It saves the exact current text
+(including multiline drafts) and clears the editor so you can ask something else.
+After that interactive prompt finishes, the saved text returns to the empty editor
+for your next prompt; it is never automatically submitted. If you have already
+started another draft, automatic restoration waits rather than overwriting it.
+Press Ctrl+S to restore manually; a nonempty current draft swaps with the stash.
+
+The stash is text-only and in memory, and clears on session changes, reload, or
+exit. Images/attachments and cursor position are not saved. The shortcut applies
+to the main editor, not pickers where Ctrl+S has a built-in action.
+Configure `extensions.stash.toggle` in the agent-directory `keybindings.json`
+with a key string or array (`[]` disables it), then `/reload`.
