@@ -16,9 +16,11 @@ const installer = join(scripts, "install-claude-statusline.mjs");
 const payload = Buffer.from(' { "session_id": "session-uuid", "model": {"id": "claude-test-model", "display_name": "Test Model"}, "prompt": "DO NOT STORE", "cost": {"total_cost_usd": 42} }\n\n');
 const [weekday, month, day, year, time] = new Date(Date.now() - 60_000).toString().split(" ");
 const info: ProcessInfo = { pid: 201, ppid: 200, startedAt: `${weekday} ${month} ${day} ${time} ${year}`, command: "claude", args: "claude" };
+// Tests may run inside Claude Code, which would otherwise leak its messaging socket into every wrapper.
+const { CLAUDE_CODE_MESSAGING_SOCKET: _, ...env } = process.env;
 const invoke = (registry: string, input = payload, command = "cat", socketPath?: string) =>
   spawnSync("node", [wrapper, "--registry", registry, "--command", command], {
-    input, env: { ...process.env, CLAUDE_CODE_MESSAGING_SOCKET: socketPath },
+    input, env: socketPath === undefined ? env : { ...env, CLAUDE_CODE_MESSAGING_SOCKET: socketPath },
   });
 
 test("wrapper preserves stdin bytes and renderer output, writes only model metadata with private permissions", () => {
@@ -72,7 +74,7 @@ test("concurrent wrapper invocations use separate temp files and leave a complet
   const directory = mkdtempSync(join(tmpdir(), "claude-statusline-concurrent-"));
   try {
     await Promise.all(Array.from({ length: 6 }, () => new Promise<void>((resolve, reject) => {
-      const child = spawn("node", [wrapper, "--registry", directory, "--command", "cat >/dev/null"], { stdio: "pipe" });
+      const child = spawn("node", [wrapper, "--registry", directory, "--command", "cat >/dev/null"], { stdio: "pipe", env });
       child.stdin.end(payload);
       child.on("error", reject);
       child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`Wrapper exited ${code}`)));
@@ -205,7 +207,7 @@ test("installer preserves existing renderer and settings, is idempotent, and uni
     assert.equal(installed.statusLine.padding, 2);
     assert.deepEqual(installed.other, original.other);
     assert.notEqual(installed.statusLine.command, original.statusLine.command);
-    const render = spawnSync("/bin/bash", ["-c", installed.statusLine.command], { input: payload });
+    const render = spawnSync("/bin/bash", ["-c", installed.statusLine.command], { input: payload, env });
     assert.equal(render.status, 0);
     assert.equal(render.stdout.toString(), "renderer's output");
     assert.ok(existsSync(join(directory, "pi ' agent", "agents-live", "claude", "session-uuid.json")));
@@ -238,7 +240,7 @@ test("uninstall refuses to overwrite a renderer changed after installation", () 
 
 test("wrapper forwards cancellation to its renderer process group", { timeout: 5_000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "claude-statusline-cancel-"));
-  const child = spawn("node", [wrapper, "--registry", directory, "--command", "printf ready; sleep 60 & wait"], { stdio: "pipe" });
+  const child = spawn("node", [wrapper, "--registry", directory, "--command", "printf ready; sleep 60 & wait"], { stdio: "pipe", env });
   try {
     child.stdin.end(payload);
     const exit = new Promise<string | null>((resolve, reject) => {
