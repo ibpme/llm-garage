@@ -177,7 +177,7 @@ if [[ $agent == claude ]]; then
     --tools 'Read,Glob,Grep,Edit,Write,Bash,WebFetch,WebSearch'
     --disallowedTools 'Agent,Task'
     --strict-mcp-config --mcp-config '{"mcpServers":{}}'
-    --permission-mode dontAsk --permission-prompts none)
+    --permission-mode auto --permission-prompts none)
   [[ -z $model ]] || agent_args+=(--model "$model")
   (( !has_effort )) || agent_args+=(--effort "$effort")
 else

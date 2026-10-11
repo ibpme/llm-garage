@@ -94,7 +94,7 @@ diff -u "$tmp/expected" "$TEST_ARGS"
 claude_base=(-p --output-format stream-json --verbose --include-partial-messages
   --no-session-persistence --tools 'Read,Glob,Grep,Edit,Write,Bash,WebFetch,WebSearch'
   --disallowedTools 'Agent,Task' --strict-mcp-config --mcp-config '{"mcpServers":{}}'
-  --permission-mode dontAsk --permission-prompts none)
+  --permission-mode auto --permission-prompts none)
 # Provider is ignored even without a model; prompt-file content stays literal.
 printf '%s' "$prompt" > "$tmp/prompt"
 output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name claude-default \

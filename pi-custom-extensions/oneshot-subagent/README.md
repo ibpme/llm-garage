@@ -94,7 +94,7 @@ All other built-in tools are excluded by `--tools`. In particular:
 | Interactive questions and planning-mode transitions (`AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`) | Not in the tool allowlist |
 | Model-invoked skill execution (`Skill`) and tool discovery | Not in the tool allowlist |
 | MCP tools, including configured delegation/browser integrations | `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` |
-| Permission prompts / automatic permission bypass | `--permission-mode dontAsk --permission-prompts none`; no bypass flag |
+| Permission prompts / automatic permission bypass | `--permission-mode auto --permission-prompts none`; no bypass flag |
 | Session persistence and continuation | `--no-session-persistence`; no resume/continue flags |
 
 Claude still loads its normal credentials, project context, settings, hooks,
