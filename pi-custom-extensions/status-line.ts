@@ -144,29 +144,34 @@ export default function statusLineExtension(pi: ExtensionAPI) {
 
           // --- Line 2: token stats + context bar + model ---
           const statParts: string[] = [];
+          const tokenParts: string[] = [];
           if (lastUsage?.input)
-            statParts.push(theme.fg("accent", `↑${formatTokens(lastUsage.input)}`));
+            tokenParts.push(theme.fg("accent", `↑${formatTokens(lastUsage.input)}`));
           if (lastUsage?.output)
-            statParts.push(theme.fg("success", `↓${formatTokens(lastUsage.output)}`));
+            tokenParts.push(theme.fg("success", `↓${formatTokens(lastUsage.output)}`));
           if (lastUsage?.cacheRead)
-            statParts.push(theme.fg("muted", `R${formatTokens(lastUsage.cacheRead)}`));
+            tokenParts.push(theme.fg("muted", `R${formatTokens(lastUsage.cacheRead)}`));
           if (lastUsage?.cacheWrite)
-            statParts.push(theme.fg("muted", `W${formatTokens(lastUsage.cacheWrite)}`));
+            tokenParts.push(theme.fg("muted", `W${formatTokens(lastUsage.cacheWrite)}`));
+          if (tokenParts.length) statParts.push(tokenParts.join(" "));
 
+          const activityParts: string[] = [];
           const agentStats = extensionStatuses.get("agent-stats");
-          if (agentStats) statParts.push(sanitizeStatus(agentStats));
+          if (agentStats) activityParts.push(sanitizeStatus(agentStats));
 
           const usingSubscription = ctx.model
             ? ctx.modelRegistry.isUsingOAuth(ctx.model)
             : false;
           if (cost || usingSubscription) {
-            statParts.push(
+            activityParts.push(
               theme.fg(
                 "warning",
                 `$${cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`,
               ),
             );
           }
+
+          if (activityParts.length) statParts.push(activityParts.join(" "));
 
           const contextUsage = ctx.getContextUsage();
           const contextWindow =

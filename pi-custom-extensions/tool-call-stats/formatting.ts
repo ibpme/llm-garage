@@ -240,13 +240,13 @@ export function statusText(
 ): string {
   const theme = ctx.ui.theme;
   const last = cycles[cycles.length - 1];
-  if (!last) return theme.fg("dim", `${totalToolCalls(toolStats)} tools · 0s total`);
+  if (!last) return theme.fg("dim", `${totalToolCalls(toolStats)} tools · 0s`);
   const totalElapsedMs = cycles.reduce((sum, trackedCycle) => sum + trackedCycle.elapsedMs, 0);
   return (
     theme.fg("success", formatRate(cycleTps(last))) +
     theme.fg("dim", " · TTFT ") +
     theme.fg("accent", formatDuration(last.ttftMs)) +
     theme.fg("dim", ` · ${totalToolCalls(toolStats)} tools · `) +
-    theme.fg("warning", `${formatWholeDuration(totalElapsedMs)} total`)
+    theme.fg("warning", `${formatWholeDuration(totalElapsedMs)}`)
   );
 }
