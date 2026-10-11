@@ -22,6 +22,7 @@ cat > "$tmp/bin/pi" <<'SH'
 #!/bin/bash
 printf '%s\n' "$@" > "$TEST_ARGS"
 printf '%s\n' "${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-unset}" > "$TEST_ADVISOR"
+printf '%s\n' "${PI_ONESHOT_SUBAGENT_CHILD:-unset}" > "$TEST_CHILD"
 sleep 1
 printf '{"type":"test"}\n'
 printf 'test stderr\n' >&2
@@ -43,7 +44,7 @@ exec "$TEST_REAL_TMUX" -S "$TEST_TMUX_SOCKET" -f /dev/null "$@"
 SH
 chmod +x "$tmp/bin/"* "$tmp/login-bin/claude"
 export PATH="$tmp/bin:$PATH" TEST_ARGS="$tmp/args" TEST_LOGIN_BIN="$tmp/login-bin"
-export TEST_EXIT_FILE="$tmp/exit-code"
+export TEST_EXIT_FILE="$tmp/exit-code" TEST_CHILD="$tmp/child-marker"
 export TEST_ADVISOR="$tmp/advisor" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=0
 prompt='Literal $(touch unwanted) ; "quoted" prompt'
 for code in 0 7; do
@@ -207,4 +208,29 @@ if /bin/bash "$root/scripts/agent-spawn.sh" --name invalid --agent claude \
   exit 1
 fi
 grep -F -- '--mode json requires --prompt or --prompt-file' "$tmp/error" >/dev/null
+# The child marker must survive a tmux server that was started without it, and
+# a stale marker in the server's global environment must not leak into normal launches.
+# Bash 3.2 (macOS /bin/bash) ignores failed [[ ]] under set -e, so assert explicitly.
+expect_child() {
+  local name=$1 marker=$2 expected=$3 output job marker_env=(-u PI_ONESHOT_SUBAGENT_CHILD)
+  [[ $marker != 1 ]] || marker_env=(PI_ONESHOT_SUBAGENT_CHILD=1)
+  rm -f "$TEST_CHILD"
+  output=$(env "${marker_env[@]}" /bin/bash "$root/scripts/agent-spawn.sh" --name "$name" \
+    --mode json --shell bash --cwd "$tmp/work" --output-dir "$tmp/jobs" --prompt test)
+  job=${output##*Files: }
+  wait_for_job "$job"
+  [[ $(cat "$job/exit.status") == 0 ]] || { echo "$name: pi did not exit cleanly" >&2; exit 1; }
+  [[ $(cat "$TEST_CHILD") == "$expected" ]] \
+    || { printf '%s: expected child marker %s, got %s\n' "$name" "$expected" "$(cat "$TEST_CHILD")" >&2; exit 1; }
+}
+tmux kill-server 2>/dev/null || :
+env -u PI_ONESHOT_SUBAGENT_CHILD tmux new-session -d -s anchor sleep 600
+expect_child marked-child 1 1
+expect_child normal-root unset unset
+tmux kill-server 2>/dev/null || :
+PI_ONESHOT_SUBAGENT_CHILD=1 tmux new-session -d -s anchor sleep 600
+expect_child stale-root unset unset
+expect_child stale-marked-child 1 1
+tmux kill-server 2>/dev/null || :
+
 printf 'agent-spawn Pi/Claude JSON tests passed\n'

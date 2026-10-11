@@ -190,8 +190,13 @@ if [[ $mode == json ]]; then
   # Unique sessions allow concurrent jobs with the same label.
   session="$name-${job_dir##*.}"
   printf '%s\n' "$session" > "$job_dir/tmux.session"
+  # tmux new-session inherits the server's global environment, not this client's,
+  # so pass the child marker explicitly and clear any stale value on the server.
+  env_bin=$(command -v env) || fail 'env is not on PATH'
+  child_env=(-u PI_ONESHOT_SUBAGENT_CHILD)
+  [[ ${PI_ONESHOT_SUBAGENT_CHILD-} != 1 ]] || child_env=(PI_ONESHOT_SUBAGENT_CHILD=1)
   # Redirect before login-shell initialization so startup output is logged too.
-  "${tmux_cmd[@]}" new-session -d -s "$session" -c "$cwd" "$bash_bin" -c \
+  "${tmux_cmd[@]}" new-session -d -s "$session" -c "$cwd" "$env_bin" "${child_env[@]}" "$bash_bin" -c \
     'job_dir=$1; shift; exec "$@" </dev/null >"$job_dir/launch.log" 2>>"$job_dir/stderr.log"' \
     agent-spawn-job "$job_dir" "$shell_bin" -lic 'exec "$@"' \
     agent-spawn-shell "$bash_bin" "$script" "${agent_args[@]}" \
