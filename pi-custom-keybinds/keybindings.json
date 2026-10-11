@@ -1,3 +1,8 @@
 {
-  "app.thinking.cycle": ["shift+right"]
+  "app.thinking.cycle": [
+    "shift+right"
+  ],
+  "extensions.suggestions.toggle": [
+    "ctrl+shift+s"
+  ]
 }

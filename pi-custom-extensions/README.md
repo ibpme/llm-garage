@@ -317,3 +317,20 @@ bun run test:loading
 Do not manually link packages from Pi's installation or install them into Bun's
 global directory for extension development. Those paths are machine-specific
 and unnecessary with the local development dependencies.
+
+### Prompt suggestions toggle keybinding
+
+Configure `extensions.suggestions.toggle` in Pi's agent-directory
+`keybindings.json` (canonical defaults: `pi-custom-keybinds/keybindings.json`):
+
+```json
+{
+  "extensions.suggestions.toggle": ["ctrl+shift+s"]
+}
+```
+
+The extension reads this entry on load. A single key string or an array of
+keys replaces the default; `[]` disables the shortcut. Missing or malformed
+configuration falls back to Ctrl+Shift+S. Run `/reload` after changes.
+The extension respects `PI_AGENT_DIR`. Tab accept, Esc dismiss, and the
+`/suggestions [on|off]` command are unchanged.

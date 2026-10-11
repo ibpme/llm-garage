@@ -1,4 +1,6 @@
-import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import { CustomEditor, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { loadToggleKeys } from "./keybindings.ts";
 import { DEFAULT_CONFIG, loadConfig, saveConfig } from "./config.ts";
 import { endsWithCompletedAssistantTurn, serializeContext, transcriptSections } from "./context.ts";
 import type { SuggestionConfig, SuggestionViewState } from "./contracts.ts";
@@ -55,13 +57,15 @@ export class PromptSuggestions {
       },
     });
 
-    this.pi.registerShortcut("shift+left", {
-      description: "Toggle follow-up prompt suggestions",
-      handler: async (ctx) => {
-        this.activeContext = ctx;
-        await this.setEnabled(!this.state.enabled, ctx);
-      },
-    });
+    for (const key of loadToggleKeys(join(getAgentDir(), "keybindings.json"))) {
+      this.pi.registerShortcut(key, {
+        description: "Toggle follow-up prompt suggestions",
+        handler: async (ctx) => {
+          this.activeContext = ctx;
+          await this.setEnabled(!this.state.enabled, ctx);
+        },
+      });
+    }
 
     this.pi.on("session_start", async (_event, ctx) => {
       this.activeContext = ctx;
