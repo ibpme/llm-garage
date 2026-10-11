@@ -126,6 +126,13 @@ else {
       const pid = Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8"));
       await assertGroupStopped(pid);
     });
+    await t.test("Pi details expose the latest completed call while keeping cumulative accounting", async () => {
+      process.env.ONESHOT_TEST_CASE = "success";
+      const outcome = await runSubagent(options());
+      assert.deepEqual(outcome.details.latestCallUsage, { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 });
+      assert.equal(outcome.details.totalTokens, 10);
+      assert.equal(outcome.usage.totalTokens, 10);
+    });
     await t.test("Claude backend normalizes model/effort and ignores provider", async () => {
       process.env.ONESHOT_TEST_CASE = "success";
       const previews: string[] = [];

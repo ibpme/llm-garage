@@ -139,7 +139,10 @@ history and are never deleted.
 ## TUI
 
 The transcript displays a named task with a themed progress gutter, elapsed time,
-turns, tool calls, token/cost totals, recent tool activity, and an answer preview.
+turns, tool calls, token/cost figures, recent tool activity, and an answer preview.
+For Pi, tokens are the latest completed model call (`last call: ↓ input · ↑ output
+· cached`, where cached is cache reads plus cache writes); cost is cumulative for
+the whole run. Claude shows its cumulative token total.
 Expand the result using Pi's normal tool expansion to see activity, working
 directory/model, Markdown output, and the job directory. Thinking content is not
 displayed or returned.
@@ -156,7 +159,11 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
 - Exit status 0 alone is not success: the JSON stream must settle without abort
   and end with a completed, nonempty assistant answer. Errors, missing exit
   status, malformed JSON, and incomplete responses are returned as tool errors.
-- Pi usage is summed from completed assistant/tool-result messages. Claude uses
+- Pi usage is summed from completed assistant/tool-result messages for run
+  accounting and cost. The displayed Pi token breakdown is the latest completed
+  assistant call only: tool-result usage never replaces it, and a call without
+  usage clears it rather than showing older data. Pi's `totalTokens` remains
+  cumulative accounting, not the display. Claude uses
   terminal `modelUsage` totals (falling back to `usage` for older streams) and
   `total_cost_usd`, replacing provisional streamed usage rather than adding it
   again. Before a result, per-message usage is deduplicated by message ID and

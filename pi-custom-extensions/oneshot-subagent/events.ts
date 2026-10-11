@@ -3,6 +3,14 @@ import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { JsonEventStream } from "./json-stream.ts";
 import type { Agent } from "./backend.ts";
 
+/** Token breakdown of the most recent completed Pi model call; display only. */
+export interface LatestCallUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface RunDetails {
   agent?: Agent;
   name: string;
@@ -18,7 +26,9 @@ export interface RunDetails {
   jobDir?: string;
   result?: string;
   exitCode?: number;
+  /** Cumulative accounting for Pi and Claude; Pi display prefers latestCallUsage. */
   totalTokens?: number;
+  latestCallUsage?: LatestCallUsage;
   usagePartial?: boolean;
   costUsd?: number;
   /** Only present in results saved by versions that supported nested delegation. */
@@ -84,6 +94,12 @@ export class EventState {
         if (message.role === "assistant") {
           this.details.turns++;
           this.addUsage(message.usage);
+          this.details.latestCallUsage = message.usage && {
+            input: message.usage.input ?? 0,
+            output: message.usage.output ?? 0,
+            cacheRead: message.usage.cacheRead ?? 0,
+            cacheWrite: message.usage.cacheWrite ?? 0,
+          };
           this.finalText = message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
           this.details.preview = this.finalText.slice(-2000);
           this.stopReason = message.stopReason;

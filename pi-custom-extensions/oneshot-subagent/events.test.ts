@@ -74,3 +74,49 @@ test("oneshot_subagent tool events are ordinary activity and never create nested
   assert.equal(s.details.toolCalls, 1);
   assert.deepEqual(s.details.activity, ["→ oneshot_subagent grandchild", "✗ oneshot_subagent failed"]);
 });
+
+const callUsage = (input: number, output: number, cacheRead: number, cacheWrite: number) =>
+  ({ ...emptyUsage(), input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite });
+
+test("latest model call replaces the display breakdown while run accounting keeps summing", () => {
+  const s = state();
+  s.feed(event({ type: "message_end", message: { ...message("Calling tool", "toolUse"), usage: callUsage(10, 1, 100, 5) } }));
+  s.feed(event({ type: "message_end", message: { ...message("Final answer"), usage: callUsage(2, 3, 4, 0) } }));
+  s.feed(event({ type: "agent_settled", aborted: false }));
+  assert.deepEqual(s.details.latestCallUsage, { input: 2, output: 3, cacheRead: 4, cacheWrite: 0 });
+  assert.equal(s.usage.input, 12);
+  assert.equal(s.usage.output, 4);
+  assert.equal(s.usage.cacheRead, 104);
+  assert.equal(s.usage.cacheWrite, 5);
+  assert.equal(s.usage.totalTokens, 125);
+});
+
+test("tool result usage is counted in run accounting but never replaces the latest model call", () => {
+  const s = state();
+  s.feed(event({ type: "message_end", message: { ...message("Calling tool", "toolUse"), usage: callUsage(2, 3, 4, 0) } }));
+  s.feed(event({ type: "message_end", message: { role: "toolResult", usage: callUsage(50, 60, 0, 7) } }));
+  assert.deepEqual(s.details.latestCallUsage, { input: 2, output: 3, cacheRead: 4, cacheWrite: 0 });
+  assert.equal(s.usage.input, 52);
+  assert.equal(s.usage.cacheWrite, 7);
+});
+
+test("an assistant message without usage clears older call data instead of showing it as latest", () => {
+  const s = state();
+  s.feed(event({ type: "message_end", message: { ...message("Calling tool", "toolUse"), usage: callUsage(2, 3, 4, 0) } }));
+  s.feed(event({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "No usage" }], stopReason: "stop" } }));
+  assert.equal(s.details.latestCallUsage, undefined);
+});
+
+test("zero-count model calls are reported as completed calls", () => {
+  const s = state();
+  s.feed(event({ type: "message_end", message: { ...message("Done"), usage: callUsage(0, 0, 0, 0) } }));
+  assert.deepEqual(s.details.latestCallUsage, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+});
+
+test("no latest call exists before a model call completes, even after tool results", () => {
+  const s = state();
+  s.feed(event({ type: "tool_execution_start", toolName: "read", args: { path: "a.ts" } }));
+  s.feed(event({ type: "message_end", message: { role: "toolResult", usage: callUsage(1, 1, 1, 1) } }));
+  assert.equal(s.details.latestCallUsage, undefined);
+  assert.equal(s.usage.input, 1);
+});

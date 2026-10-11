@@ -2,10 +2,19 @@ import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
 import { oneLine, type RunDetails } from "./events.ts";
 
+const count = (value: number) => value.toLocaleString("en-US");
+
 export function stats(details: RunDetails): string {
+  const latest = details.latestCallUsage;
+  // Pi runs show only the latest call; their cumulative total is accounting metadata.
+  // Legacy results without an agent discriminator keep their saved total.
+  const cumulative = !latest && details.agent !== "pi" && details.totalTokens
+    ? ` · ${count(details.totalTokens)} tokens${details.usagePartial ? " (partial)" : ""}` : "";
+  const lastCall = latest
+    ? ` · last call: ↓ ${count(latest.input)} input · ↑ ${count(latest.output)} output · cached ${count(latest.cacheRead + latest.cacheWrite)}`
+    : "";
   return `${(details.durationMs / 1000).toFixed(1)}s · ${details.turns} turns · ${details.toolCalls} tool calls` +
-    (details.totalTokens ? ` · ${details.totalTokens.toLocaleString("en-US")} tokens${details.usagePartial ? " (partial)" : ""}` : "") +
-    (details.costUsd ? ` · $${details.costUsd.toFixed(4)}` : "");
+    lastCall + cumulative + (details.costUsd ? ` · $${details.costUsd.toFixed(4)}` : "");
 }
 
 export function renderRun(details: RunDetails, expanded: boolean, theme: Theme): Component {
