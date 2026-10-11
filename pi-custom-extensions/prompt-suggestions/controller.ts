@@ -19,7 +19,7 @@ function statusText(state: SuggestionViewState, theme: ExtensionContext["ui"]["t
   if (!state.enabled) body = "off";
   else if (state.phase === "thinking") body = "thinking…";
   else if (state.phase === "unavailable") body = "unavailable";
-  else if (state.suggestion) body = "on · Tab accept · Esc dismiss";
+  else if (state.suggestion) body = "on · Tab accept";
   else body = "on";
   return prefix + theme.fg("muted", ` ${body}`);
 }
@@ -112,11 +112,6 @@ export class PromptSuggestions {
     if (this.state.phase !== "idle") this.patchState({ phase: "idle" });
   }
 
-  private dismiss = (): void => {
-    this.cancelRequest();
-    if (this.state.suggestion) this.patchState({ suggestion: null });
-  };
-
   private installEditor(ctx: ExtensionContext): void {
     if (ctx.mode !== "tui") return;
     if (this.installTimer) clearTimeout(this.installTimer);
@@ -129,7 +124,7 @@ export class PromptSuggestions {
         const base =
           previous?.(tui, theme, keybindings) ??
           new CustomEditor(tui, theme, keybindings);
-        return new SuggestionEditor(base, this.state, this.dismiss);
+        return new SuggestionEditor(base, this.state);
       });
     }, 0);
   }
@@ -168,8 +163,7 @@ export class PromptSuggestions {
       if (
         generation !== this.generation ||
         controller.signal.aborted ||
-        !this.state.enabled ||
-        ctx.ui.getEditorText()
+        !this.state.enabled
       ) {
         return;
       }

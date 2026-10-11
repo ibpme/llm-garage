@@ -17,11 +17,13 @@ export class SuggestionEditor implements EditorComponent, Focusable {
   private submitHandler: ((text: string) => void) | undefined;
   private changeHandler: ((text: string) => void) | undefined;
 
-  constructor(
-    private readonly base: EditorComponent,
-    private readonly state: SuggestionViewState,
-    private readonly dismiss: () => void,
-  ) { }
+  private readonly base: EditorComponent;
+  private readonly state: SuggestionViewState;
+
+  constructor(base: EditorComponent, state: SuggestionViewState) {
+    this.base = base;
+    this.state = state;
+  }
 
   get focused(): boolean {
     return isFocusable(this.base) ? this.base.focused : false;
@@ -88,27 +90,18 @@ export class SuggestionEditor implements EditorComponent, Focusable {
 
   handleInput(data: string): void {
     const suggestion = this.state.suggestion;
-    if (suggestion && matchesKey(data, "tab")) {
-      this.dismiss();
+    if (this.state.enabled && suggestion && !this.base.getText() && matchesKey(data, "tab")) {
       this.base.setText(suggestion);
       return;
     }
-    if (suggestion && matchesKey(data, "escape")) {
-      this.dismiss();
-      return;
-    }
-
-    this.dismiss();
     this.base.handleInput(data);
   }
 
   setText(text: string): void {
-    if (text) this.dismiss();
     this.base.setText(text);
   }
 
   insertTextAtCursor(text: string): void {
-    this.dismiss();
     this.base.insertTextAtCursor?.(text);
   }
 
@@ -151,7 +144,7 @@ export class SuggestionEditor implements EditorComponent, Focusable {
   render(width: number): string[] {
     const lines = this.base.render(width);
     const suggestion = this.state.suggestion;
-    if (!suggestion || this.base.getText()) return lines;
+    if (!this.state.enabled || !suggestion || this.base.getText()) return lines;
 
     const lineIndex = lines.findIndex(
       (line) => line.includes(CURSOR_MARKER) || line.includes(SOFTWARE_CURSOR),
