@@ -1,9 +1,9 @@
 # Background one-shot subagents
 
 Status: implementation plan; background execution is not implemented yet.
-Builds on the leaf-only change ([leaf-oneshot-subagents.md](leaf-oneshot-subagents.md),
-commit f88f251): only root sessions delegate, and every child is a leaf, so each
-background job is a single process group with no descendants.
+Builds on the leaf-only change (commit f88f251): only root sessions delegate, and
+every child is a leaf, so each background job is a single process group with no
+descendants.
 
 ## Goal
 
