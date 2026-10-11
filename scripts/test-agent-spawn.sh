@@ -69,7 +69,7 @@ for code in 0 7; do
   done
   [[ $(cat "$job/exit.status") == "$code" ]]
   [[ $(cat "$TEST_ADVISOR") == 0 ]]
-  printf '%s\n' --mode json -- "$prompt" > "$tmp/expected"
+  printf '%s\n' --mode json --no-session -- "$prompt" > "$tmp/expected"
   diff -u "$tmp/expected" "$TEST_ARGS"
   grep -Fx '{"type":"test"}' "$job/events.jsonl" >/dev/null
   grep -Fx 'test stderr' "$job/stderr.log" >/dev/null
@@ -112,6 +112,8 @@ wait_for_job "$second_job"
 /bin/bash "$root/scripts/agent-spawn.sh" --name interactive --shell bash \
   --cwd "$tmp/work" > "$tmp/interactive-launch"
 tmux has-session -t '=interactive'
+printf '\n' > "$tmp/expected"
+diff -u "$tmp/expected" "$TEST_ARGS"
 if /bin/bash "$root/scripts/agent-spawn.sh" --name interactive --shell bash \
   --cwd "$tmp/work" > "$tmp/error" 2>&1; then
   echo 'Expected duplicate interactive session rejection' >&2
@@ -127,7 +129,7 @@ output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name pi-options \
   --model 'provider/model:literal' --provider provider --thinking high --prompt "$prompt")
 job=${output##*Files: }
 wait_for_job "$job"
-printf '%s\n' --mode json --model 'provider/model:literal' --provider provider \
+printf '%s\n' --mode json --no-session --model 'provider/model:literal' --provider provider \
   --thinking high -- "$prompt" > "$tmp/expected"
 diff -u "$tmp/expected" "$TEST_ARGS"
 

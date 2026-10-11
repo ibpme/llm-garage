@@ -52,7 +52,9 @@ has completed.
 ## Detached JSON jobs
 
 JSON mode requires `--prompt` or `--prompt-file` and returns after startup;
-it does **not** wait for the agent's final answer.
+it does **not** wait for the agent's final answer. Session persistence is disabled
+for both agents: Pi uses `--no-session`, and Claude uses `--no-session-persistence`.
+Interactive Pi keeps its normal session persistence. JSON job logs remain on disk.
 
 ```bash
 # Pi

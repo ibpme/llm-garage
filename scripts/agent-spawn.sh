@@ -180,7 +180,7 @@ if [[ $agent == claude ]]; then
   [[ -z $model ]] || agent_args+=(--model "$model")
   (( !has_effort )) || agent_args+=(--effort "$effort")
 else
-  [[ $mode != json ]] || agent_args+=(--mode json)
+  [[ $mode != json ]] || agent_args+=(--mode json --no-session)
   [[ -z $model ]] || agent_args+=(--model "$model")
   [[ -z $provider ]] || agent_args+=(--provider "$provider")
   [[ -z $thinking ]] || agent_args+=(--thinking "$thinking")
