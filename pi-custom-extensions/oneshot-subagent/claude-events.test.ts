@@ -78,3 +78,106 @@ test("stream usage survives interrupted runs, deduplicates content frames, and i
   assert.equal(s.usage.totalTokens, 10);
   assert.equal(s.details.usagePartial, false);
 });
+
+const callBreakdown = (input: number, output: number, cacheRead: number, cacheWrite: number) =>
+  ({ input, output, cacheRead, cacheWrite });
+const start = (id: string, usage?: unknown) => event({ type: "stream_event", event: { type: "message_start", message: { id, ...(usage ? { usage } : {}) } } });
+const delta = (usage: unknown) => event({ type: "stream_event", event: { type: "message_delta", usage } });
+const stop = () => event({ type: "stream_event", event: { type: "message_stop" } });
+const completed = (id: string, usage?: unknown, extra = {}) => event({ type: "assistant", message: { id, content: [], ...(usage ? { usage } : {}), ...extra } });
+
+test("latest completed call is the breakdown of the last completed assistant message across calls", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: 5 }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(10, 1, 100, 5));
+  s.feed(start("m2", { input_tokens: 2, cache_read_input_tokens: 4 }));
+  s.feed(delta({ output_tokens: 3 }));
+  s.feed(stop());
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(2, 3, 4, 0));
+  assert.equal(s.usage.input, 12);
+  assert.equal(s.usage.output, 4);
+  assert.equal(s.usage.cacheRead, 104);
+  assert.equal(s.usage.cacheWrite, 5);
+  assert.equal(s.usage.totalTokens, 125);
+});
+
+test("a streaming call keeps the previous completed call until its message completes, then merges usage per message", () => {
+  const s = state();
+  s.feed(completed("m0", { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 1 }));
+  s.feed(start("m1", { input_tokens: 5, cache_read_input_tokens: 2 }));
+  s.feed(delta({ output_tokens: 3 }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(1, 1, 1, 1));
+  s.feed(stop());
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(5, 3, 2, 0));
+  assert.equal(s.usage.totalTokens, 4 + 10);
+});
+
+test("full assistant completion and message_stop for one message record that call once, duplicates included", () => {
+  const s = state();
+  const usage = { input_tokens: 5, output_tokens: 3, cache_read_input_tokens: 2 };
+  s.feed(completed("m0", { input_tokens: 9, output_tokens: 9 }));
+  s.feed(start("m1", { input_tokens: 5, cache_read_input_tokens: 2 }));
+  s.feed(delta({ output_tokens: 3 }));
+  s.feed(stop());
+  s.feed(completed("m1", usage));
+  s.feed(completed("m1", usage));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(5, 3, 2, 0));
+  assert.equal(s.usage.totalTokens, 18 + 10);
+});
+
+test("a stale duplicate of an earlier completed call never replaces the newest completed call", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 1, output_tokens: 1 }));
+  s.feed(completed("m2", { input_tokens: 7, output_tokens: 2 }));
+  s.feed(completed("m1", { input_tokens: 1, output_tokens: 1 }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(7, 2, 0, 0));
+  assert.equal(s.usage.totalTokens, 11);
+});
+
+test("a completed message without usage clears the older call instead of showing it as latest", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 2, output_tokens: 3 }));
+  s.feed(start("m2"));
+  s.feed(stop());
+  assert.equal(s.details.latestCallUsage, undefined);
+  s.feed(completed("m1", { input_tokens: 2, output_tokens: 3 }));
+  s.feed(completed("m3", undefined));
+  assert.equal(s.details.latestCallUsage, undefined);
+});
+
+test("zero-count completed calls are reported as zero breakdowns, not missing", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 4, output_tokens: 1 }));
+  s.feed(completed("m2", { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(0, 0, 0, 0));
+});
+
+test("tool, user, nested and unknown events never overwrite the latest completed call", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 2, output_tokens: 3, cache_read_input_tokens: 4 }));
+  s.feed(event({ type: "user", message: { id: "u1", usage: { input_tokens: 50, output_tokens: 60 }, content: [{ type: "tool_result", tool_use_id: "t1" }] } }));
+  s.feed(event({ type: "assistant", parent_tool_use_id: "sub", message: { id: "nested", usage: { input_tokens: 70, output_tokens: 80 }, content: [] } }));
+  s.feed(start("nested-start", { input_tokens: 90 }));
+  s.feed(delta({ output_tokens: 99 }));
+  s.feed(event({ type: "stream_event", parent_tool_use_id: "sub", event: { type: "message_stop" } }));
+  s.feed(event({ type: "system", subtype: "status", message: { usage: { input_tokens: 11 } } }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(2, 3, 4, 0));
+});
+
+test("terminal totals never replace the last completed call and events after the result do not change it", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: 5 }));
+  const modelUsage = { main: { inputTokens: 700, outputTokens: 300, cacheReadInputTokens: 10, cacheCreationInputTokens: 2 } };
+  s.feed(event(result({ modelUsage })));
+  assert.equal(s.usage.totalTokens, 1012);
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(10, 1, 100, 5));
+  s.feed(completed("m9", { input_tokens: 1, output_tokens: 1 }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(10, 1, 100, 5));
+});
+
+test("a run whose only data is terminal totals has no latest call", () => {
+  const s = state();
+  s.feed(event(result({ usage: { input_tokens: 1, output_tokens: 2 } })));
+  assert.equal(s.usage.totalTokens, 3);
+  assert.equal(s.details.latestCallUsage, undefined);
+});

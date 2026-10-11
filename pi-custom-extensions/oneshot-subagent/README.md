@@ -140,9 +140,10 @@ history and are never deleted.
 
 The transcript displays a named task with a themed progress gutter, elapsed time,
 turns, tool calls, token/cost figures, recent tool activity, and an answer preview.
-For Pi, tokens are the latest completed model call (`last call: ↓ input · ↑ output
+For Pi and Claude, tokens are the latest completed model call (`last call: ↓ input · ↑ output
 · cached`, where cached is cache reads plus cache writes); cost is cumulative for
-the whole run. Claude shows its cumulative token total.
+the whole run. Before a call completes, no token figure is shown. Cumulative totals
+are reported to Pi as tool usage, not displayed.
 Expand the result using Pi's normal tool expansion to see activity, working
 directory/model, Markdown output, and the job directory. Thinking content is not
 displayed or returned.
@@ -160,15 +161,19 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
   and end with a completed, nonempty assistant answer. Errors, missing exit
   status, malformed JSON, and incomplete responses are returned as tool errors.
 - Pi usage is summed from completed assistant/tool-result messages for run
-  accounting and cost. The displayed Pi token breakdown is the latest completed
-  assistant call only: tool-result usage never replaces it, and a call without
-  usage clears it rather than showing older data. Pi's `totalTokens` remains
-  cumulative accounting, not the display. Claude uses
+  accounting and cost. Claude cumulative usage is summed the same way, per message
+  ID, before a result. The displayed token breakdown for both backends is the latest
+  completed assistant call only: tool-result, user, and nested-subagent events never
+  replace it, and a completion without usage clears it rather than showing older
+  data. Terminal totals do not replace it either; the last completed call stays
+  displayed through the final result. Claude completion is a `message_stop` or
+  full `assistant` event, deduplicated by message ID. Claude uses
   terminal `modelUsage` totals (falling back to `usage` for older streams) and
   `total_cost_usd`, replacing provisional streamed usage rather than adding it
-  again. Before a result, per-message usage is deduplicated by message ID and
-  displayed as partial. Interrupted runs preserve those partial token totals;
+  again. Before a result, cumulative per-message usage is deduplicated by message
+  ID and marked partial for accounting. Interrupted runs preserve those partial token totals;
   cost is unavailable until a result. Both are reported once to Pi as tool usage.
+  Pi's `totalTokens` remains cumulative accounting, not the display.
 - Claude requires a terminal `result` with `subtype: "success"`, `is_error: false`,
   a nonempty answer and normal completion. An incomplete/aborted/error result
   fails even with exit status 0; Pi retains its `agent_settled` checks.

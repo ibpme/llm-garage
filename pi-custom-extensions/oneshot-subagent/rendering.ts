@@ -6,9 +6,9 @@ const count = (value: number) => value.toLocaleString("en-US");
 
 export function stats(details: RunDetails): string {
   const latest = details.latestCallUsage;
-  // Pi runs show only the latest call; their cumulative total is accounting metadata.
+  // Pi and Claude show only the latest completed call; cumulative totals are accounting metadata.
   // Legacy results without an agent discriminator keep their saved total.
-  const cumulative = !latest && details.agent !== "pi" && details.totalTokens
+  const cumulative = !latest && details.agent === undefined && details.totalTokens
     ? ` · ${count(details.totalTokens)} tokens${details.usagePartial ? " (partial)" : ""}` : "";
   const lastCall = latest
     ? ` · last call: ↓ ${count(latest.input)} input · ↑ ${count(latest.output)} output · cached ${count(latest.cacheRead + latest.cacheWrite)}`

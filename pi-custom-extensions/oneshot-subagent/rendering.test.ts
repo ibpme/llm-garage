@@ -67,10 +67,17 @@ test("Pi runs without a latest call do not fall back to cumulative totals", () =
   }
 });
 
-test("Claude keeps its cumulative total, including partial marking", () => {
+test("Claude shows the latest call breakdown and never its cumulative total", () => {
+  const claude = { ...pi, agent: "claude", latestCallUsage: { input: 2, output: 3, cacheRead: 1, cacheWrite: 3 }, totalTokens: 999 } as RunDetails;
+  assert.equal(stats(claude), "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4");
+  assert.equal(stats({ ...claude, usagePartial: true, costUsd: 0.01 }),
+    "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · $0.0100");
+});
+
+test("Claude runs without a completed call show no tokens, not terminal or streamed totals", () => {
   const claude = { ...pi, agent: "claude", totalTokens: 10 } as RunDetails;
-  assert.equal(stats(claude), "1.0s · 2 turns · 3 tool calls · 10 tokens");
-  assert.equal(stats({ ...claude, usagePartial: true }), "1.0s · 2 turns · 3 tool calls · 10 tokens (partial)");
+  assert.equal(stats(claude), "1.0s · 2 turns · 3 tool calls");
+  assert.equal(stats({ ...claude, usagePartial: true }), "1.0s · 2 turns · 3 tool calls");
 });
 
 test("legacy results without an agent discriminator keep their saved total", () => {

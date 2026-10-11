@@ -1,16 +1,24 @@
-import { emptyUsage, oneLine, type RunDetails } from "./events.ts";
+import { emptyUsage, oneLine, type LatestCallUsage, type RunDetails } from "./events.ts";
 import { JsonEventStream } from "./json-stream.ts";
 
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown): JsonObject => value && typeof value === "object" ? value as JsonObject : {};
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 const text = (value: unknown): string => typeof value === "string" ? value : "";
+const USAGE_KEYS = ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
+const breakdown = (usage: JsonObject | undefined): LatestCallUsage | undefined => {
+  if (!usage || !USAGE_KEYS.some((key) => typeof usage[key] === "number")) return undefined;
+  return { input: number(usage.input_tokens), output: number(usage.output_tokens),
+    cacheRead: number(usage.cache_read_input_tokens), cacheWrite: number(usage.cache_creation_input_tokens) };
+};
 
 export class ClaudeEventState {
   readonly usage = emptyUsage();
   finalText = "";
   private result?: JsonObject;
   private currentMessageId?: string;
+  private latestCallId?: string;
+  private readonly completedCalls = new Set<string>();
   private readonly messageUsage = new Map<string, JsonObject>();
   private readonly toolIds = new Set<string>();
   private readonly stream = new JsonEventStream((event) => this.accept(object(event)));
@@ -42,6 +50,19 @@ export class ClaudeEventState {
     this.usage.totalTokens = this.usage.input + this.usage.output + this.usage.cacheRead + this.usage.cacheWrite;
   }
 
+  // Display only: a completion replaces the latest call, even with no usage, so
+  // older usage is never shown as the newest call. Repeated completions of the
+  // newest call are idempotent; older duplicates are ignored.
+  private completeCall(id: string | undefined, usage: JsonObject | undefined): void {
+    if (this.result) return;
+    if (id) {
+      if (this.completedCalls.has(id) && id !== this.latestCallId) return;
+      this.completedCalls.add(id);
+      this.latestCallId = id;
+    }
+    this.details.latestCallUsage = breakdown(id ? this.messageUsage.get(id) : usage);
+  }
+
   private accept(event: JsonObject): void {
     // Leaf runs should never contain subagent messages. Do not let any that
     // appear overwrite the main response or double-count its tools.
@@ -57,13 +78,19 @@ export class ClaudeEventState {
         this.provisionalUsage(this.currentMessageId, message.usage);
       } else if (update.type === "message_delta") {
         this.provisionalUsage(this.currentMessageId, update.usage);
+      } else if (update.type === "message_stop") {
+        this.completeCall(this.currentMessageId, undefined);
       }
       const delta = object(update.delta);
       if (update.type === "content_block_delta" && delta.type === "text_delta")
         this.details.preview = (this.details.preview + text(delta.text)).slice(-2000);
     } else if (event.type === "assistant" || event.type === "user") {
       const message = object(event.message);
-      if (event.type === "assistant") this.provisionalUsage(text(message.id) || undefined, message.usage);
+      if (event.type === "assistant") {
+        const id = text(message.id) || undefined;
+        this.provisionalUsage(id, message.usage);
+        this.completeCall(id, object(message.usage));
+      }
       const content = message.content;
       if (!Array.isArray(content)) return;
       for (const raw of content) {

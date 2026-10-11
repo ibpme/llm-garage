@@ -3,7 +3,7 @@ import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { JsonEventStream } from "./json-stream.ts";
 import type { Agent } from "./backend.ts";
 
-/** Token breakdown of the most recent completed Pi model call; display only. */
+/** Token breakdown of the most recent completed Pi or Claude model call; display only. */
 export interface LatestCallUsage {
   input: number;
   output: number;
@@ -26,7 +26,7 @@ export interface RunDetails {
   jobDir?: string;
   result?: string;
   exitCode?: number;
-  /** Cumulative accounting for Pi and Claude; Pi display prefers latestCallUsage. */
+  /** Cumulative accounting for Pi and Claude; not displayed (see latestCallUsage). */
   totalTokens?: number;
   latestCallUsage?: LatestCallUsage;
   usagePartial?: boolean;
