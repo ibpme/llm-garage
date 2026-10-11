@@ -15,6 +15,7 @@ mcp/pi-mcp.json           native pi MCP server defaults -- opt-in, see below
 pi-custom-extensions/      one local Pi package of TypeScript extensions + tracked Bun lockfile
 pi-custom-config/           tracked defaults for mutable pi extension configuration
 pi-custom-keybinds/         pi-specific keybindings.json override
+scripts/                   tmux agent launcher and process detection
 sync/
   lib.sh                  shared symlink + backup helpers
   config_merge.py         merges/removes config entries (MCP servers, top-level JSON keys) in tool native config files
@@ -120,6 +121,22 @@ budget allows main → child → terminal grandchild, preserved across reloads a
 resumes. `pi-custom-config/oneshot-subagent.json` supplies the copied-once local
 default. Delegation currently remains available in SAFE mode. Claude is always
 a leaf with MCP/native subagents disabled; neither backend is a sandbox.
+
+## Live agent browser and Claude model metadata
+
+Pi's [`/agents` extension](pi-custom-extensions/agents/README.md) discovers live Pi
+and Claude Code processes, switches to interactive tmux panes, and moves them
+into splits. Non-interactive processes are listed read-only. An optional wrapper
+captures Claude's model metadata while preserving your existing status line:
+
+```bash
+node pi-custom-extensions/agents/scripts/install-claude-statusline.mjs
+# Undo just this integration:
+node pi-custom-extensions/agents/scripts/install-claude-statusline.mjs --uninstall
+```
+
+The installer backs up Claude settings and changes only `statusLine.command`.
+This integration is opt-in, independent of the normal sync/unsync scripts.
 
 ## Undoing a sync
 

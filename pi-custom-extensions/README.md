@@ -41,6 +41,7 @@ larger features use focused modules:
 
 | Feature | Responsibilities |
 |---|---|
+| `agents/` | Process/tmux discovery, registry metadata, endpoint diagnostics, picker |
 | `oneshot-subagent/` | One-shot Pi/Claude delegation, JSON event tracking, process lifecycle, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
 | `questionnaire/` | Registration/reanswer workflow, model parsing, schemas, UI, tree compatibility |
@@ -64,6 +65,7 @@ Important runtime relationships that a static import tree cannot show:
 | SSH redirects base styled tools in CLI override mode | `stylish-tools/overrides.ts` |
 | Reasoning tokens feed agent statistics | Event name/payload in `contracts/events.ts` |
 | Footer positions mode and SSH badges | Keys in `contracts/status-keys.ts` |
+| Claude status-line wrapper supplies agent metadata | Registry files read by `agents/registry.ts` |
 
 Tool-set is the sole owner of active-tool application. Its blocked-tool additions
 are instance-owned and survive session resets for that runtime. SSH integration
@@ -106,6 +108,15 @@ pi -e ./pi-custom-extensions --ssh user@host:/remote/path
 The styled tools delegate execution to Pi's original implementations and share
 rendering between local and remote variants. Expanded results use an indicator
 and gutter rather than boxes; compact previews retain each tool's output caps.
+
+## Agent browser
+
+[`agents/`](agents/README.md) adds `/agents`, a live Pi and Claude Code process
+picker. Enter switches to a selected tmux pane; Shift+V moves it into a top/bottom
+split, and Shift+H or Shift+Enter moves it into a left/right split. Headless
+processes and processes without a pane on the current server appear in a read-only
+Non-interactive section. Pi instances loading the extension publish working/idle
+status; Claude supplies its status through `claude agents --json`.
 
 ## One-shot subagent
 
@@ -278,9 +289,10 @@ bun run test:loading         # Manifest discovery and imports; no model calls
 ```
 
 Tests cover tool selection and SAFE masking, remote integration in both startup
-orders, cross-import services, guards, and pure parsing/formatting/accounting.
-Live SSH, model-provider calls, and interactive UI behavior still require manual
-smoke testing.
+orders, cross-import services, guards, pure parsing/formatting/accounting, and the
+agent browser. The tmux integration test uses an isolated server and skips when
+tmux is unavailable. Live SSH, model-provider calls, and interactive UI behavior
+still require manual smoke testing.
 
 This loads the package through a temporary symlink, checks that every declared
 extension loads exactly once, and rejects loading errors or warnings.
