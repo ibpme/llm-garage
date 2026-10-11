@@ -27,6 +27,12 @@ if [ ! -e "$SUGGESTIONS_CONFIG" ] && [ ! -L "$SUGGESTIONS_CONFIG" ]; then
   echo "installed default $SUGGESTIONS_CONFIG"
 fi
 
+SUBAGENT_CONFIG="$TARGET/oneshot-subagent.json"
+if [ ! -e "$SUBAGENT_CONFIG" ] && [ ! -L "$SUBAGENT_CONFIG" ]; then
+  cp "$REPO_ROOT/pi-custom-config/oneshot-subagent.json" "$SUBAGENT_CONFIG"
+  echo "installed default $SUBAGENT_CONFIG"
+fi
+
 # Symlink this repo's keybindings.json override (unlike extensions, pi reads
 # this as a single whole file, not a directory of entries).
 link_one "$REPO_ROOT/pi-custom-keybinds/keybindings.json" "$TARGET/keybindings.json"

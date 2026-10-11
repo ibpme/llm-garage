@@ -41,6 +41,7 @@ larger features use focused modules:
 
 | Feature | Responsibilities |
 |---|---|
+| `oneshot-subagent/` | One-shot Pi/Claude delegation, JSON event tracking, process lifecycle, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
 | `questionnaire/` | Registration/reanswer workflow, model parsing, schemas, UI, tree compatibility |
 | `ssh/` | Registration/connection lifecycle, operations, transport, tool-set integration |
@@ -105,6 +106,18 @@ pi -e ./pi-custom-extensions --ssh user@host:/remote/path
 The styled tools delegate execution to Pi's original implementations and share
 rendering between local and remote variants. Expanded results use an indicator
 and gutter rather than boxes; compact previews retain each tool's output caps.
+
+## One-shot subagent
+
+[`oneshot-subagent/`](oneshot-subagent/README.md) adds `oneshot_subagent` for
+self-contained delegation to a fresh Pi or Claude Code process via `scripts/agent-spawn.sh`
+in JSON mode. The task and live tool activity render in the transcript; the
+child's final answer and usage return to the main agent. Cancellation, timeout,
+and shutdown stop its owned process tree. Delegation currently remains available in SAFE mode. Claude is a leaf backend
+with a built-in tool allowlist and MCP/native subagents disabled. The
+durable default depth limit allows main → child → terminal grandchild; session
+metadata retains the limit across reloads and resumes. Calls do not share conversation
+history; include all needed context in the task.
 
 ## Loaded skills
 

@@ -75,9 +75,9 @@ repository, and later syncs preserve the user's local preference.
 
 ## Detached agent launcher
 
-`scripts/agent-spawn.sh` starts Pi in its own detached tmux session, either
-interactively or as a one-shot JSON event stream. The first version supports
-Pi only; Claude can be added later.
+`scripts/agent-spawn.sh` starts interactive Pi in a detached tmux session, or
+a one-shot Pi/Claude JSON event stream in a detached process without tmux.
+Claude is JSON-only and uses the leaf policy in the extension README.
 
 ```bash
 ./scripts/agent-spawn.sh --name review-api --cwd "$PWD" \
@@ -90,7 +90,7 @@ Pi only; Claude can be added later.
 ```
 
 JSON mode requires a prompt. Its `events.jsonl` can be followed while the job
-runs or replayed later; `exit.status` appears after Pi exits. A missing status
+runs or replayed later; `exit.status` appears after the agent exits. A missing status
 file means the job did not record a normal exit. Pi can exit with status 0 even
 when an agent response failed or was aborted; inspect the JSON events for that.
 By default, files are saved under `~/.local/state/agent-spawn/`; use
@@ -103,10 +103,23 @@ Omit the prompt to open Pi ready for input, or use `--prompt '...'` instead of
 starts an interactive login shell before Pi, so its startup files can set the
 agent's environment. Shell names are resolved on `PATH`, or supply an absolute
 path such as `--shell /usr/local/bin/zsh`; Bash is required to run the launcher.
-Optional `--provider` requires `--model`; `--socket` selects a non-default tmux
-server. Interactive launches confirm the process stays running briefly;
+Optional `--provider` requires `--model` for Pi and is ignored for Claude; `--socket` selects a non-default tmux
+server (interactive mode only). JSON launches require Node.js, record the wrapper
+PID in `pid`, and redirect shell startup output to `launch.log`. Interactive launches confirm the process stays running briefly;
 JSON launches report startup separately from Pi's eventual exit status. Run
 `./scripts/agent-spawn.sh --help` for the full interface.
+
+## One-shot agent delegation
+
+The [`oneshot-subagent` extension](pi-custom-extensions/oneshot-subagent/README.md)
+adds a `oneshot_subagent` tool for delegating a standalone task to Pi or Claude Code through the
+JSON launcher. It renders live progress in the TUI and returns the child's final
+answer to the main agent. Each call starts fresh and supports cancellation and a
+timeout. Pi inherits the parent model by default; Claude uses its own defaults. The durable default depth
+budget allows main → child → terminal grandchild, preserved across reloads and
+resumes. `pi-custom-config/oneshot-subagent.json` supplies the copied-once local
+default. Delegation currently remains available in SAFE mode. Claude is always
+a leaf with MCP/native subagents disabled; neither backend is a sandbox.
 
 ## Undoing a sync
 

@@ -22,6 +22,7 @@
     "extensions": [
       "./alias.ts",
       "./loaded-skills/index.ts",
+      "./oneshot-subagent/index.ts",
       "./permission-gate.ts",
       "./prompt-suggestions/index.ts",
       "./protected-paths.ts",
