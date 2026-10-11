@@ -23,7 +23,7 @@ text(await tools.oneshot_subagent({
 
 | Parameter | Default |
 |---|---|
-| `agent` | `pi`; use `claude` for the leaf Claude Code backend |
+| `agent` | `pi`; use `claude` for Claude Code |
 | `task` | Required complete, standalone task |
 | `name` | `subagent`; letters, digits, underscores, hyphens |
 | `cwd` | Main agent's working directory; relative paths resolve from there |
@@ -107,85 +107,54 @@ not automatically a failed run. This leaf policy is not a sandbox: permitted
 shell commands or hooks can still launch other processes. Stronger restrictions
 on arbitrary process spawning/customizations are deferred.
 
-## Delegation depth
+## Leaf children
 
-The default `maxDepth: 2` permits exactly:
+Only a root session (a Pi session not launched by this extension) can delegate:
 
 ```text
-main agent (depth 0) -> subagent (depth 1) -> subagent (depth 2)
-        can delegate          can delegate          cannot delegate
+main agent (root) -> one-shot child (leaf)
 ```
 
-The durable local configuration is `<Pi agent directory>/oneshot-subagent.json`
-(`~/.pi/agent/oneshot-subagent.json` by default; respects `PI_AGENT_DIR`):
+Every child, Pi or Claude, is a leaf. There is no depth setting; to turn
+delegation off, disable the extension in Pi. A leftover
+`<Pi agent directory>/oneshot-subagent.json` from earlier versions is ignored.
 
-```json
-{ "maxDepth": 2 }
-```
+The runner launches children with `PI_ONESHOT_SUBAGENT_CHILD=1`, and a child does
+not register `oneshot_subagent` at all. On `session_start` a child appends an
+`oneshot-subagent-role` session entry, so reload, resume, and fork restore the
+role without the environment. Compatibility with earlier versions fails closed:
+the old `PI_ONESHOT_SUBAGENT_CONTEXT` variable, an `oneshot-subagent-context`
+entry with depth above 0, and malformed entries all mean child. Old depth-0
+entries remain roots. A child's task is prefixed with a short note that it cannot
+delegate.
 
-The canonical default is `pi-custom-config/oneshot-subagent.json`.
-`sync/sync-pi.sh` copies it only if the local file is missing, preserving local
-preferences. A missing file also defaults to 2. Values 0–16 are accepted:
-0 disables delegation and 1 allows only direct children. Invalid configuration
-fails closed. Changes apply on reload/new processes; start a new root session to
-increase a previously persisted session's budget.
+The marker means "one-shot child", not "any spawned agent": only this runner sets
+it. `scripts/agent-spawn.sh` is a plain launcher with no child guard, so other
+launches (such as future interactive tmux agents) are not restricted by it.
 
-Each Pi child receives a versioned `PI_ONESHOT_SUBAGENT_CONTEXT` containing its
-incremented depth, immutable inherited maximum, and owned run directory. Tool
-arguments cannot override the budget. Leaf agents register the tool as
-`hidden` (not model-visible or callable through codemode), with a second check
-inside execution and the runner.
+This is a recursion guard, not a sandbox. A child with shell access can still run
+`agent-spawn.sh`, `pi -p`, or `claude -p`. The Claude leaf policy above separately
+disables native Claude delegation.
 
-Claude consumes one level of the same parent budget, but is always a leaf:
-its recorded child `maxDepth` is capped to its own depth, even when the parent
-has budget remaining. Inherited metadata also makes a Pi process launched by
-Claude terminal if it retains the environment. Native Claude delegation is
-disabled separately by the tool policy above.
-
-A `oneshot-subagent-context` custom session entry persists the identity before
-the first prompt. Reload, resume, and fork restore that identity; tree navigation
-cannot reset session-wide depth. Restoration never lowers recorded depth or
-raises the inherited maximum. Malformed metadata disables delegation rather than
-treating the agent as a fresh root. Old `PI_ONESHOT_SUBAGENT_CHILD=1` launches
-without new metadata remain terminal for safe migration.
-
-Job roots also contain `delegation.json`. Descendant roots live in their active
-parent's `children/` directory, providing durable ownership for recursive
-cancellation of separately detached process groups. Finished and cancellation
-markers avoid revisiting old jobs and block new descendants of cancelled parents.
-A resumed session retains its depth but does not reuse an old job's process
-ownership directory.
+Each job directory holds one child's files and is stopped as a single process
+group. Directories from earlier versions, including any `children/`, are inert
+history and are never deleted.
 
 ## TUI
 
 The transcript displays a named task with a themed progress gutter, elapsed time,
 turns, tool calls, token/cost totals, recent tool activity, and an answer preview.
 Expand the result using Pi's normal tool expansion to see activity, working
-directory/model, Markdown output, and the job directory. Progress also shows
-child depth and its inherited maximum. Thinking content is not
+directory/model, Markdown output, and the job directory. Thinking content is not
 displayed or returned.
 
-The expanded child result also contains nested subagent sections with their
-names, tasks, live activity, Markdown responses, status/depth/usage, and job
-paths. Nested gutters show the hierarchy without colored background panels.
-Compact results show only the number of nested subagents. Updates are correlated
-by tool-call ID, including calls made through codemode, so parallel agents with
-the same name remain distinct.
-
-Nested display snapshots are saved in tool-result details, so they remain
-available on session resume even if the job logs are removed. Capture applies to
-new delegations after reload; older saved tool results without nested snapshots
-are not automatically backfilled. Snapshots are bounded to 32 descendant runs,
-16 levels, and 256 Ki characters of nested text, with per-field limits and visible
-truncation/omission notices. Full data remains in the job JSONL logs. Nested
-snapshots are display-only: they do not change the final answer returned to the
-main model or double-count nested usage.
+Results saved by earlier versions that contain nested subagent snapshots still
+render: only the top-level run is shown, with a "nested runs: see job logs" notice.
 
 ## Lifecycle and failures
 
-- Esc / tool cancellation, timeout, or session shutdown terminates the owned
-  process tree, including separately detached subagents and child tools, with
-  SIGTERM then SIGKILL.
+- Esc / tool cancellation, timeout, or session shutdown terminates the child's
+  process group, including its tools, with SIGTERM then SIGKILL.
 - Cancellation during launch waits for launch acknowledgement (up to 15 seconds)
   so the detached PID can be cleaned up.
 - Exit status 0 alone is not success: the JSON stream must settle without abort
@@ -196,7 +165,7 @@ main model or double-count nested usage.
   `total_cost_usd`, replacing provisional streamed usage rather than adding it
   again. Before a result, per-message usage is deduplicated by message ID and
   displayed as partial. Interrupted runs preserve those partial token totals;
-  cost is unavailable until a result. Both are reported to Pi as nested tool usage.
+  cost is unavailable until a result. Both are reported once to Pi as tool usage.
 - Claude requires a terminal `result` with `subtype: "success"`, `is_error: false`,
   a nonempty answer and normal completion. An incomplete/aborted/error result
   fails even with exit status 0; Pi retains its `agent_settled` checks.
@@ -215,20 +184,15 @@ This is **not** a sandbox. A child can edit files, run commands, and use its own
 configured tools (Pi may also use MCP; Claude MCP is disabled). Parent permission
 prompts/tool restrictions are not forwarded. **Delegation remains available in
 Pi SAFE mode for both backends for now. SAFE does not make the child read-only.**
-The depth budget and Claude leaf policy still apply. Switching modes does not
+The leaf rule and Claude leaf policy still apply. Switching modes does not
 revoke already-running children; cancel them first if needed.
-
-The depth budget applies to this extension, not arbitrary shell commands or
-other delegation tools. It is a recursion guard, not a security boundary; agents
-with unrestricted shell access can alter files/environment or launch Pi directly.
 
 Requires the repository launcher, Node.js, Bash, and Pi on PATH after the
 launcher's login shell initializes (Zsh by default), or Claude Code for
 `agent: "claude"`. Claude flags were checked against installed version 2.1.295;
 older versions lacking these flags will fail rather than silently relax policy.
 The canonical package manifest includes this extension; use `/reload` after updating the repository.
-No extra dependencies are needed. Run sync to install the new local depth
-configuration file; the default budget also works before syncing.
+No extra dependencies or configuration are needed.
 
 ## Tests
 

@@ -124,10 +124,10 @@ status; Claude supplies its status through `claude agents --json`.
 self-contained delegation to a fresh Pi or Claude Code process via `scripts/agent-spawn.sh`
 in JSON mode. The task and live tool activity render in the transcript; the
 child's final answer and usage return to the main agent. Cancellation, timeout,
-and shutdown stop its owned process tree. Delegation currently remains available in SAFE mode. Claude is a leaf backend
-with a built-in tool allowlist and MCP/native subagents disabled. The
-durable default depth limit allows main → child → terminal grandchild; session
-metadata retains the limit across reloads and resumes. Calls do not share conversation
+and shutdown stop its owned process tree. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
+and MCP/native subagents disabled. Only the main session can delegate: one-shot
+children never register the tool, and a session entry keeps that role across
+reloads, resumes, and forks. Calls do not share conversation
 history; include all needed context in the task.
 
 ## Loaded skills

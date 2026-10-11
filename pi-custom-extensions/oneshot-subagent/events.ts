@@ -1,6 +1,5 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { updateNested } from "./nested.ts";
 import { JsonEventStream } from "./json-stream.ts";
 import type { Agent } from "./backend.ts";
 
@@ -22,15 +21,11 @@ export interface RunDetails {
   totalTokens?: number;
   usagePartial?: boolean;
   costUsd?: number;
+  /** Only present in results saved by versions that supported nested delegation. */
   depth?: number;
   maxDepth?: number;
-  children?: NestedRun[];
+  children?: unknown[];
   childrenOmitted?: number;
-  displayTruncated?: boolean;
-}
-
-export interface NestedRun extends RunDetails {
-  toolCallId: string;
 }
 
 export const oneLine = (text: string, limit = 180): string =>
@@ -95,7 +90,6 @@ export class EventState {
           this.errorMessage = message.errorMessage;
         } else if (message.role === "toolResult") {
           this.addUsage(message.usage);
-          if (message.toolName === "oneshot_subagent") updateNested(this.details, message.toolCallId, undefined, message, message.isError);
         }
         break;
       }
@@ -103,15 +97,10 @@ export class EventState {
         this.details.toolCalls++;
         const args = event.args as Record<string, unknown>;
         const target = args.path ?? args.command ?? args.query ?? args.pattern ?? args.name ?? "";
-        if (event.toolName === "oneshot_subagent") updateNested(this.details, event.toolCallId, args);
         this.activity(`→ ${event.toolName} ${typeof target === "string" ? target : ""}`);
         break;
       }
-      case "tool_execution_update":
-        if (event.toolName === "oneshot_subagent") updateNested(this.details, event.toolCallId, event.args, event.partialResult);
-        break;
       case "tool_execution_end":
-        if (event.toolName === "oneshot_subagent") updateNested(this.details, event.toolCallId, undefined, event.result, event.isError);
         if (event.isError) this.activity(`✗ ${event.toolName} failed`);
         break;
       case "auto_retry_start": this.activity(`↻ Retry ${event.attempt}: ${event.errorMessage}`); break;

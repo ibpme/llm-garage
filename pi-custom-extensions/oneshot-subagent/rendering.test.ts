@@ -26,25 +26,21 @@ for (const status of ["running", "success", "error", "aborted"] as const) {
   });
 }
 
-for (const status of ["running", "success", "error", "aborted"] as const) {
-  test(`expanded parent renders ${status} grandchild task, activity, response and logs without backgrounds`, () => {
-    const details: RunDetails = { name: "child", task: "Child task", cwd: "/tmp", status: "running", activity: [], preview: "", turns: 0, toolCalls: 1, durationMs: 0,
-      children: [{ name: "grandchild", toolCallId: "nested-1", task: "Grandchild unique task 中文 😀", cwd: "/tmp", status,
-        activity: ["→ read grandchild.ts"], preview: "Grandchild live response", result: "Grandchild final response",
-        depth: 2, maxDepth: 2, turns: 1, toolCalls: 1, durationMs: 1000, jobDir: "/tmp/grandchild-job" }] };
-    const expanded = renderRun(details, true, theme);
-    for (const width of [1, 2, 3, 4, 10, 40, 80, 120]) assert.ok(expanded.render(width).every((line) => visibleWidth(line) <= width));
-    const output = expanded.render(120).join("\n");
-    assert.match(output, /Subagent · grandchild/);
-    assert.match(output, /Grandchild unique task/);
-    assert.match(output, /→ read grandchild.ts/);
-    assert.match(output, /depth 2\/2/);
-    assert.match(output, status === "running" ? /Grandchild live response/ : /Grandchild final response/);
-    assert.match(output, /logs: \/tmp\/grandchild-job/);
-    assert.match(output, /│ │/);
-    assert.ok(!/\x1b\[(?:4\d|48)[;m]/.test(output));
-    const collapsed = renderRun(details, false, theme).render(120).join("\n");
-    assert.match(collapsed, /1 nested subagent/);
-    assert.ok(!collapsed.includes("Grandchild unique task"));
-  });
-}
+test("old saved results with nested children render top-level only with a notice", () => {
+  const legacy = { name: "child", task: "Parent task", cwd: "/tmp", status: "success", activity: [], preview: "", turns: 1, toolCalls: 1, durationMs: 1000,
+    result: "Parent final answer", depth: 1, maxDepth: 2, childrenOmitted: 3, displayTruncated: true,
+    children: [{ name: "grandchild", toolCallId: "nested-1", task: "Grandchild unique task", status: "success", result: "Grandchild final response",
+      children: [{ name: "great", toolCallId: "nested-2" }] }] } as unknown as RunDetails;
+  for (const expanded of [false, true]) {
+    const component = renderRun(legacy, expanded, theme);
+    for (const width of [1, 4, 40, 120]) assert.ok(component.render(width).every((line) => visibleWidth(line) <= width));
+    const output = component.render(120).join("\n");
+    assert.match(output, /nested runs: see job logs/);
+    assert.match(output, /Parent final answer|Parent task/);
+    assert.doesNotMatch(output, /Grandchild|depth/);
+  }
+  for (const children of [undefined, [], "garbage", null] as unknown[]) {
+    const output = renderRun({ ...legacy, children, childrenOmitted: undefined } as unknown as RunDetails, true, theme).render(120).join("\n");
+    assert.doesNotMatch(output, /nested runs/);
+  }
+});

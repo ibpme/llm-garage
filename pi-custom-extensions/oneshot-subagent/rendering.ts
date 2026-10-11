@@ -3,13 +3,12 @@ import { Markdown, Text, truncateToWidth, type Component } from "@earendil-works
 import { oneLine, type RunDetails } from "./events.ts";
 
 export function stats(details: RunDetails): string {
-  return (details.depth !== undefined ? `depth ${details.depth}/${details.maxDepth} · ` : "") + `${(details.durationMs / 1000).toFixed(1)}s · ${details.turns} turns · ${details.toolCalls} tool calls` +
+  return `${(details.durationMs / 1000).toFixed(1)}s · ${details.turns} turns · ${details.toolCalls} tool calls` +
     (details.totalTokens ? ` · ${details.totalTokens.toLocaleString("en-US")} tokens${details.usagePartial ? " (partial)" : ""}` : "") +
     (details.costUsd ? ` · $${details.costUsd.toFixed(4)}` : "");
 }
 
-export function renderRun(details: RunDetails, expanded: boolean, theme: Theme, level = 0): Component {
-  if (level > 16) return new Text(theme.fg("dim", "Further nested runs omitted; see job logs."), 0, 0);
+export function renderRun(details: RunDetails, expanded: boolean, theme: Theme): Component {
   const running = details.status === "running";
   const tone = details.status === "success" ? "success" : details.status === "error" ? "error" : "warning";
   const icon = running ? "◌" : details.status === "success" ? "✓" : details.status === "aborted" ? "■" : "✗";
@@ -36,16 +35,8 @@ export function renderRun(details: RunDetails, expanded: boolean, theme: Theme, 
       children.push(new Text(theme.fg("toolOutput", lines.map((line) => oneLine(line, 240)).join("\n")), 0, 0));
     }
   }
-  if (expanded) {
-    for (const child of details.children ?? []) {
-      children.push(new Text(theme.fg("accent", `Subagent · ${oneLine(child.name, 64)}`), 0, 0));
-      children.push(renderRun(child, true, theme, level + 1));
-    }
-    if (details.displayTruncated) children.push(new Text(theme.fg("warning", "Nested display truncated; see job logs for full details."), 0, 0));
-    if (details.childrenOmitted) children.push(new Text(theme.fg("dim", `${details.childrenOmitted} further nested runs omitted; see job logs.`), 0, 0));
-  } else if (details.children?.length) {
-    children.push(new Text(theme.fg("dim", `${details.children.length} nested subagent${details.children.length === 1 ? "" : "s"} · expand for tasks, activity and responses`), 0, 0));
-  }
+  if ((Array.isArray(details.children) && details.children.length) || details.childrenOmitted)
+    children.push(new Text(theme.fg("dim", "nested runs: see job logs"), 0, 0));
   if (expanded && details.jobDir) children.push(new Text(theme.fg("dim", `logs: ${details.jobDir}`), 0, 0));
   if (!expanded && !running) children.push(new Text(theme.fg("dim", "Expand for the full response and job files"), 0, 0));
   return {

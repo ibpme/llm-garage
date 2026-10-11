@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { runSubagent, type RunOptions } from "./runner.ts";
+import { CHILD_NOTICE, runSubagent, type RunOptions } from "./runner.ts";
 
 const launcher = resolve(dirname(fileURLToPath(import.meta.url)), "../../scripts/agent-spawn.sh");
 
@@ -27,7 +27,7 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
   for (const name of ["bash", "zsh"]) await writeFile(join(bin, name), shell, { mode: 0o755 });
   await writeFile(join(bin, "pi"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, context: JSON.parse(process.env.PI_ONESHOT_SUBAGENT_CONTEXT), cwd: process.cwd() }));
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, legacyContext: process.env.PI_ONESHOT_SUBAGENT_CONTEXT, cwd: process.cwd() }));
 const mode = process.env.ONESHOT_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
@@ -48,7 +48,7 @@ else {
 `, { mode: 0o755 });
   await writeFile(join(bin, "claude"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), context: JSON.parse(process.env.PI_ONESHOT_SUBAGENT_CONTEXT) }));
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, legacyContext: process.env.PI_ONESHOT_SUBAGENT_CONTEXT }));
 const mode = process.env.ONESHOT_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
@@ -69,7 +69,7 @@ else {
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const updates: string[] = [];
   const options = (overrides: Partial<RunOptions> = {}): RunOptions => ({
-    launcher, policy: { version: 1, depth: 0, maxDepth: 2 }, name: "test", task: 'Literal $(touch unwanted) ; "quoted" task', cwd: root,
+    launcher, name: "test", task: 'Literal $(touch unwanted) ; "quoted" task', cwd: root,
     model: "model-id", provider: "provider", thinking: "high", timeoutSeconds: 10,
     signal: new AbortController().signal, outputRoot: join(root, "jobs"),
     onProgress: (details) => updates.push(details.status), ...overrides,
@@ -85,10 +85,10 @@ else {
       assert.ok(updates.length > 0);
       const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
       assert.equal(captured.child, "1");
-      assert.equal(captured.context.depth, 1);
-      assert.equal(captured.context.maxDepth, 2);
-      assert.deepEqual(JSON.parse(await readFile(join(captured.context.runDir, "delegation.json"), "utf8")), captured.context);
-      assert.deepEqual(captured.args, ["--mode", "json", "--model", "model-id", "--provider", "provider", "--thinking", "high", "--", options().task]);
+      assert.equal(captured.legacyContext, undefined);
+      assert.deepEqual(captured.args, ["--mode", "json", "--model", "model-id", "--provider", "provider", "--thinking", "high", "--", CHILD_NOTICE + options().task]);
+      assert.equal(outcome.details.task, options().task);
+      assert.deepEqual(await readdir(dirname(outcome.details.jobDir!)), [outcome.details.jobDir!.split("/").at(-1)], "one job directory and no run markers or children");
       assert.equal((await stat(outcome.details.jobDir!)).mode & 0o777, 0o700);
       assert.equal(await readFile(join(outcome.details.jobDir!, "final-response.md"), "utf8"), "Final 😀 answer");
     });
@@ -127,50 +127,7 @@ else {
       const pid = Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8"));
       await assertGroupStopped(pid);
     });
-    await t.test("grandchildren inherit the budget and live under the parent's durable ownership tree", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
-      const parentDir = join(root, "owned-parent");
-      await mkdir(parentDir);
-      const outcome = await runSubagent(options({ policy: { version: 1, depth: 1, maxDepth: 2, runDir: parentDir } }));
-      assert.equal(outcome.details.status, "success");
-      assert.equal(outcome.details.depth, 2);
-      assert.ok(outcome.details.jobDir!.startsWith(join(parentDir, "children")));
-      const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
-      assert.equal(captured.context.depth, 2);
-      assert.equal(captured.context.maxDepth, 2);
-      const forbidden = await runSubagent(options({ policy: captured.context }));
-      assert.equal(forbidden.details.status, "error");
-      assert.match(forbidden.text, /depth limit reached/);
-      assert.equal(forbidden.details.jobDir, undefined);
-    });
-    await t.test("parent cancellation also stops separately detached grandchildren", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
-      const controller = new AbortController();
-      let nested: ReturnType<typeof runSubagent> | undefined;
-      const parent = await runSubagent(options({ signal: controller.signal, onProgress: (details) => {
-        if (!details.jobDir || nested) return;
-        nested = runSubagent(options({ policy: { version: 1, depth: 1, maxDepth: 2, runDir: dirname(details.jobDir) },
-          onProgress: (child) => { if (child.jobDir) controller.abort(); } }));
-      } }));
-      assert.equal(parent.details.status, "aborted");
-      assert.ok(nested);
-      const child = await nested;
-      assert.equal(child.details.status, "error");
-      for (const outcome of [parent, child]) {
-        const pid = Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8"));
-        await assertGroupStopped(pid);
-      }
-    });
-    await t.test("cancelled parents cannot start new descendants", async () => {
-      const parentDir = join(root, "cancelled-parent");
-      await mkdir(parentDir);
-      await writeFile(join(parentDir, "cancelled"), "cancelled");
-      const outcome = await runSubagent(options({ policy: { version: 1, depth: 1, maxDepth: 2, runDir: parentDir } }));
-      assert.equal(outcome.details.status, "error");
-      assert.match(outcome.text, /Parent subagent has been cancelled/);
-      assert.equal(outcome.details.jobDir, undefined);
-    });
-    await t.test("Claude backend normalizes model/effort, ignores provider and is terminal in the depth tree", async () => {
+    await t.test("Claude backend normalizes model/effort and ignores provider", async () => {
       process.env.ONESHOT_TEST_CASE = "success";
       const previews: string[] = [];
       const outcome = await runSubagent(options({ agent: "claude", model: "sonnet:low", effort: "high", thinking: undefined,
@@ -185,15 +142,13 @@ else {
       assert.equal(outcome.usage.cost.total, 0.02);
       assert.ok(previews.some((preview) => preview.startsWith("Live")));
       const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
-      assert.equal(captured.context.depth, 1);
-      assert.equal(captured.context.maxDepth, 1);
+      assert.equal(captured.child, "1");
+      assert.equal(captured.legacyContext, undefined);
       assert.ok(captured.args.includes("--effort"));
       assert.ok(captured.args.includes("high"));
       assert.ok(!captured.args.includes("--provider"));
       assert.ok(!captured.args.includes("--thinking"));
-      assert.equal(captured.args.at(-1), options().task);
-      const forbidden = await runSubagent(options({ policy: captured.context }));
-      assert.match(forbidden.text, /depth limit reached/);
+      assert.equal(captured.args.at(-1), CHILD_NOTICE + options().task);
     });
     for (const mode of ["error", "exit", "missing-result"]) await t.test(`Claude ${mode} returns an error`, async () => {
       process.env.ONESHOT_TEST_CASE = mode;

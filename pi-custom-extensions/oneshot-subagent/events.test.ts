@@ -66,21 +66,11 @@ test("malformed records fail rather than silently dropping protocol data", () =>
   assert.throws(() => state().feed('{"type":', true));
 });
 
-test("JSON tool events carry nested task/activity/response without double-counting usage", () => {
+test("oneshot_subagent tool events are ordinary activity and never create nested runs", () => {
   const s = state();
   s.feed(event({ type: "tool_execution_start", toolName: "oneshot_subagent", toolCallId: "nested-1", args: { name: "grandchild", task: "Inspect files" } }));
-  assert.equal(s.details.children![0].task, "Inspect files");
-  s.feed(event({ type: "tool_execution_update", toolName: "oneshot_subagent", toolCallId: "nested-1", args: {}, partialResult: {
-    details: { status: "running", activity: ["→ read file.ts"], preview: "Analyzing" },
-  } }));
-  assert.equal(s.details.children![0].preview, "Analyzing");
-  const result = { content: [{ type: "text", text: "Final nested answer" }], details: { status: "success", result: "Final nested answer" },
-    usage: { ...emptyUsage(), input: 11, totalTokens: 11 } };
-  s.feed(event({ type: "tool_execution_end", toolName: "oneshot_subagent", toolCallId: "nested-1", result, isError: false }));
-  s.feed(event({ type: "message_end", message: { role: "toolResult", toolName: "oneshot_subagent", toolCallId: "nested-1", ...result, isError: false } }));
-  assert.equal(s.details.children!.length, 1);
-  assert.equal(s.details.children![0].result, "Final nested answer");
-  assert.deepEqual(s.details.children![0].activity, ["→ read file.ts"]);
-  assert.equal(s.usage.input, 11);
-  assert.equal(s.finalText, "");
+  s.feed(event({ type: "tool_execution_end", toolName: "oneshot_subagent", toolCallId: "nested-1", result: {}, isError: true }));
+  assert.equal(s.details.children, undefined);
+  assert.equal(s.details.toolCalls, 1);
+  assert.deepEqual(s.details.activity, ["→ oneshot_subagent grandchild", "✗ oneshot_subagent failed"]);
 });

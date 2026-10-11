@@ -180,18 +180,6 @@ class SyncScriptTests(SyncFixture):
         self.run_script("sync-pi.sh")
         self.assertEqual(self.config.read_bytes(), original)
 
-    def test_pi_sync_installs_subagent_depth_default_once(self) -> None:
-        self.run_script("sync-pi.sh")
-        config = self.home / ".pi/agent/oneshot-subagent.json"
-        self.assertFalse(config.is_symlink())
-        self.assertEqual(json.loads(config.read_text()), {"maxDepth": 2})
-        config.write_text('{"maxDepth": 1}\n')
-        before = (config.read_bytes(), config.stat().st_mtime_ns)
-        self.run_script("sync-pi.sh")
-        self.assertEqual((config.read_bytes(), config.stat().st_mtime_ns), before)
-        self.run_script("unsync-pi.sh")
-        self.assertEqual(json.loads(config.read_text()), {"maxDepth": 1})
-
     def test_pi_sync_links_canonical_prompts(self) -> None:
         self.run_script("sync-pi.sh")
         prompt = self.home / ".pi/agent/prompts/audit-garage.md"

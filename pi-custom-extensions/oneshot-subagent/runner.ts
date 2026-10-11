@@ -6,15 +6,13 @@ import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Usage } from "@earendil-works/pi-ai";
 import { EventState, type RunDetails } from "./events.ts";
-import { childPolicy, DEPTH_ENV, type DepthPolicy } from "./depth.ts";
-import { settleNested } from "./nested.ts";
+import { CHILD_ENV } from "./role.ts";
 import { ClaudeEventState } from "./claude-events.ts";
 import { resolveBackend, type Agent, type Effort } from "./backend.ts";
 
 export interface RunOptions {
   launcher: string;
   agent?: Agent;
-  policy: DepthPolicy;
   name: string;
   task: string;
   cwd: string;
@@ -28,10 +26,14 @@ export interface RunOptions {
   outputRoot?: string;
 }
 
-function launch(script: string, args: string[], policy: DepthPolicy): Promise<void> {
+// Advisory only: a child with shell access can still launch other agents.
+export const CHILD_NOTICE = "You are a one-shot subagent. You cannot delegate: do not launch other agents or subagents " +
+  "(including via agent-spawn.sh, pi, or claude); complete the task yourself.\n\n";
+
+function launch(script: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile("bash", [script, ...args], {
-      env: { ...process.env, [DEPTH_ENV]: JSON.stringify(policy), PI_ONESHOT_SUBAGENT_CHILD: "1" },
+      env: { ...process.env, [CHILD_ENV]: "1" },
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
     }, (error, _stdout, stderr) => error ? reject(new Error(`Launcher failed: ${stderr.trim() || error.message}`)) : resolve());
@@ -74,34 +76,22 @@ async function stopJob(jobDir: string): Promise<void> {
 }
 
 async function stopRun(runDir: string): Promise<void> {
-  if (await optionalRead(join(runDir, "finished")) !== undefined) return;
-  await writeFile(join(runDir, "cancelled"), "cancelled\n", { mode: 0o600 });
-  const stopChildren = async () => {
-    let children: string[];
-    try { children = await readdir(join(runDir, "children")); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-    await Promise.all(children.filter((name) => name.startsWith("oneshot-")).map((name) => stopRun(join(runDir, "children", name))));
-  };
-  await stopChildren();
-  // Detached descendants have their own process groups. Wait for an in-flight
-  // launcher to publish its PID before declaring the owned subtree stopped.
+  // The child is detached; wait for an in-flight launcher to publish its PID
+  // before declaring the job stopped.
   const deadline = Date.now() + 15_000;
   while (await optionalRead(join(runDir, "launching")) !== undefined) {
     const entries = await readdir(runDir, { withFileTypes: true });
-    const pids = await Promise.all(entries.filter((entry) => entry.isDirectory() && entry.name !== "children")
+    const pids = await Promise.all(entries.filter((entry) => entry.isDirectory())
       .map((entry) => optionalRead(join(runDir, entry.name, "pid"))));
     if (pids.some((pid) => pid !== undefined)) break;
     if (Date.now() >= deadline) throw new Error(`Cannot clean up an in-flight subagent launch: ${runDir}`);
     await sleep(100);
   }
   for (const entry of await readdir(runDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name === "children") continue;
+    if (!entry.isDirectory()) continue;
     const job = join(runDir, entry.name);
     if (await optionalRead(join(job, "exit.status")) === undefined) await stopJob(job);
   }
-  // A descendant may have created its job while the parent was terminating.
-  await stopChildren();
-  await writeFile(join(runDir, "finished"), "cancelled\n", { mode: 0o600 });
 }
 
 export async function runSubagent(options: RunOptions): Promise<{ details: RunDetails; text: string; usage: Usage }> {
@@ -124,21 +114,12 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     options.signal.throwIfAborted();
     const backend = resolveBackend(options);
     details.model = backend.model;
-    if (options.policy.depth >= options.policy.maxDepth) throw new Error(`Subagent depth limit reached (${options.policy.depth}/${options.policy.maxDepth})`);
     details.cwd = await realpath(resolve(options.cwd));
-    const root = options.policy.runDir ? join(options.policy.runDir, "children") :
-      options.outputRoot ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agent-spawn");
-    if (options.policy.runDir && await optionalRead(join(options.policy.runDir, "cancelled")) !== undefined)
-      throw new Error("Parent subagent has been cancelled");
+    const root = options.outputRoot ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agent-spawn");
     await mkdir(root, { recursive: true });
     runDir = await mkdtemp(join(root, "oneshot-"));
-    const context = childPolicy(options.policy, runDir);
-    if (backend.agent === "claude") context.maxDepth = context.depth;
-    details.depth = context.depth;
-    details.maxDepth = context.maxDepth;
-    await writeFile(join(runDir, "delegation.json"), JSON.stringify(context, null, 2) + "\n", { mode: 0o600 });
     const promptFile = join(runDir, "task.md");
-    await writeFile(promptFile, options.task, { mode: 0o600 });
+    await writeFile(promptFile, CHILD_NOTICE + options.task, { mode: 0o600 });
     const args = ["--agent", backend.agent, "--name", options.name, "--mode", "json", "--cwd", details.cwd,
       "--prompt-file", promptFile, "--output-dir", runDir];
     if (backend.model) args.push("--model", backend.model);
@@ -148,10 +129,8 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     report();
     // Wait for launch acknowledgement even on cancellation: the child is detached
     // and we need its PID before cleanup can reliably terminate it.
-    if (options.policy.runDir && await optionalRead(join(options.policy.runDir, "cancelled")) !== undefined)
-      throw new Error("Parent subagent has been cancelled");
     await writeFile(join(runDir, "launching"), "launching\n", { mode: 0o600 });
-    try { await launch(options.launcher, args, context); }
+    try { await launch(options.launcher, args); }
     finally { await unlink(join(runDir, "launching")); }
     jobDir = join(runDir, (await readdir(runDir)).find((name) => name.startsWith(`${options.name}.`)) ?? "");
     if (jobDir === runDir) throw new Error("Launcher did not create a job directory");
@@ -214,7 +193,6 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     }
     details.jobDir = jobDir;
     if (!completed && runDir) await stopRun(runDir);
-    if (runDir) await writeFile(join(runDir, "finished"), details.status + "\n", { mode: 0o600 });
     details.durationMs = Date.now() - started;
     details.totalTokens = state.usage.totalTokens;
     details.costUsd = details.usagePartial ? undefined : state.usage.cost.total;
@@ -228,7 +206,6 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     }
   }
   details.result = result;
-  settleNested(details);
   const text = result + (jobDir ? `\n\n[Subagent job: ${jobDir}]` : "");
   return { details, text, usage: state.usage };
 }
