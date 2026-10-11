@@ -1,6 +1,7 @@
 # Background one-shot subagents
 
-Status: implementation plan; background execution is not implemented yet.
+Status: implemented (background default, detached supervisor, `subagent_jobs`,
+`/agents` integration, indicator and notices). Exit confirmation remains a follow-up.
 Builds on the leaf-only change (commit f88f251): only root sessions delegate, and
 every child is a leaf, so each background job is a single process group with no
 descendants.

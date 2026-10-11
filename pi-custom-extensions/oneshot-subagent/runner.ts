@@ -24,7 +24,17 @@ export interface RunOptions {
   signal: AbortSignal;
   onProgress: (details: RunDetails) => void;
   outputRoot?: string;
+  /** Use this existing private directory instead of creating `oneshot-*` under outputRoot. */
+  runDir?: string;
+  /** Deadline origin; defaults to the call time. */
+  startedAt?: number;
+  /** Called once the detached child has published its PID. */
+  onLaunched?: (jobDir: string, pid: number) => Promise<void> | void;
 }
+
+export type RunOutcome = "success" | "error" | "cancelled" | "timed-out";
+
+class TimeoutError extends Error {}
 
 // Advisory only: a child with shell access can still launch other agents.
 export const CHILD_NOTICE = "You are a one-shot subagent. You cannot delegate: do not launch other agents or subagents " +
@@ -94,8 +104,8 @@ async function stopRun(runDir: string): Promise<void> {
   }
 }
 
-export async function runSubagent(options: RunOptions): Promise<{ details: RunDetails; text: string; usage: Usage }> {
-  const started = Date.now();
+export async function runSubagent(options: RunOptions): Promise<{ details: RunDetails; text: string; usage: Usage; outcome: RunOutcome; resultPath?: string }> {
+  const started = options.startedAt ?? Date.now();
   const details: RunDetails = { name: options.name, task: options.task, cwd: options.cwd,
     agent: options.agent ?? "pi", model: options.model, status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
   const state = options.agent === "claude" ? new ClaudeEventState(details) : new EventState(details);
@@ -103,6 +113,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
   let jobDir: string | undefined;
   let completed = false;
   let result = "";
+  let outcome: RunOutcome = "error";
   const report = () => {
     details.durationMs = Date.now() - started;
     details.totalTokens = state.usage.totalTokens;
@@ -115,9 +126,12 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     const backend = resolveBackend(options);
     details.model = backend.model;
     details.cwd = await realpath(resolve(options.cwd));
-    const root = options.outputRoot ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agent-spawn");
-    await mkdir(root, { recursive: true });
-    runDir = await mkdtemp(join(root, "oneshot-"));
+    if (options.runDir) runDir = options.runDir;
+    else {
+      const root = options.outputRoot ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agent-spawn");
+      await mkdir(root, { recursive: true });
+      runDir = await mkdtemp(join(root, "oneshot-"));
+    }
     const promptFile = join(runDir, "task.md");
     await writeFile(promptFile, CHILD_NOTICE + options.task, { mode: 0o600 });
     const args = ["--agent", backend.agent, "--name", options.name, "--mode", "json", "--cwd", details.cwd,
@@ -139,6 +153,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     options.signal.throwIfAborted();
     const pid = Number((await readFile(join(jobDir, "pid"), "utf8")).trim());
     if (!Number.isInteger(pid) || pid <= 1) throw new Error("Launcher returned an invalid PID");
+    await options.onLaunched?.(jobDir, pid);
     const stream = await open(join(jobDir, "events.jsonl"), "r");
     const decoder = new StringDecoder("utf8");
     const buffer = Buffer.alloc(64 * 1024);
@@ -148,7 +163,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
       const drain = async () => {
         while (true) {
           options.signal.throwIfAborted();
-          if (Date.now() - started > options.timeoutSeconds * 1000) throw new Error(`Timed out after ${options.timeoutSeconds}s`);
+          if (Date.now() - started > options.timeoutSeconds * 1000) throw new TimeoutError(`Timed out after ${options.timeoutSeconds}s`);
           const { bytesRead } = await stream.read(buffer, 0, buffer.length, position);
           if (!bytesRead) break;
           position += bytesRead;
@@ -167,6 +182,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
           const failure = state.failure(details.exitCode);
           if (failure) throw new Error(failure);
           details.status = "success";
+          outcome = "success";
           result = state.finalText;
           break;
         }
@@ -180,6 +196,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     } finally { await stream.close(); }
   } catch (error) {
     details.status = options.signal.aborted ? "aborted" : "error";
+    outcome = options.signal.aborted ? "cancelled" : error instanceof TimeoutError ? "timed-out" : "error";
     result = options.signal.aborted ? "One-shot subagent was cancelled." : `One-shot subagent failed: ${error instanceof Error ? error.message : String(error)}`;
     if (jobDir) {
       const stderr = await readTail(join(jobDir, "stderr.log"));
@@ -198,8 +215,9 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     details.costUsd = details.usagePartial ? undefined : state.usage.cost.total;
   }
 
+  let resultPath: string | undefined;
   if (jobDir) {
-    const finalPath = join(jobDir, "final-response.md");
+    const finalPath = resultPath = join(jobDir, "final-response.md");
     await writeFile(finalPath, result, { mode: 0o600 });
     if (Buffer.byteLength(result, "utf8") > 40 * 1024) {
       result = Buffer.from(result).subarray(0, 40 * 1024).toString("utf8") + `\n\n[Truncated. Full response: ${finalPath}]`;
@@ -207,5 +225,5 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
   }
   details.result = result;
   const text = result + (jobDir ? `\n\n[Subagent job: ${jobDir}]` : "");
-  return { details, text, usage: state.usage };
+  return { details, text, usage: state.usage, outcome, resultPath };
 }

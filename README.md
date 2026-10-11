@@ -114,9 +114,11 @@ JSON launches report startup separately from Pi's eventual exit status. Run
 
 The [`oneshot-subagent` extension](pi-custom-extensions/oneshot-subagent/README.md)
 adds a `oneshot_subagent` tool for delegating a standalone task to Pi or Claude Code through the
-JSON launcher. It renders live progress in the TUI and returns the child's final
-answer to the main agent. Each call starts fresh and supports cancellation and a
-timeout. Pi inherits the parent model by default; Claude uses its own defaults.
+JSON launcher. Tasks run in the background by default: the main agent receives a
+job receipt, keeps working, and later retrieves the answer with `subagent_jobs`;
+jobs survive reloads and Pi exit and can be inspected or cancelled in `/agents`.
+`mode: "foreground"` waits and returns the final answer with live progress. Each
+call starts fresh and supports cancellation and a timeout. Pi inherits the parent model by default; Claude uses its own defaults.
 Only the main (root) session can delegate: one-shot children, Pi or Claude, are
 leaves and never get the tool, a role that persists across reloads, resumes and
 forks. To turn delegation off, disable the extension in Pi. Delegation currently

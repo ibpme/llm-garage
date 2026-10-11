@@ -5,20 +5,26 @@ one-shot lifecycle and Claude leaf policy are intentionally limited; the
 interface may evolve as that feature takes shape.
 
 Adds `oneshot_subagent`, a model-callable tool that delegates a standalone task to
-a fresh Pi or Claude Code process using this repository's `scripts/agent-spawn.sh --mode json`.
-The call waits for the child to finish and returns its final assistant text to
-the main agent. It works in interactive, print, and JSON modes.
+a fresh Pi or Claude Code process using this repository's `scripts/agent-spawn.sh --mode json`,
+and `subagent_jobs`, which manages the resulting background jobs. Both are
+registered in root sessions only. They work in interactive, print, and JSON modes.
+
+By default a delegation runs in the **background**: the tool returns a job receipt
+as soon as the child has started, and the main agent keeps working. With
+`mode: "foreground"` the call waits for the child and returns its final answer, as
+earlier versions always did.
 
 ## Use
 
 Ask Pi to delegate a task, or call the tool through codemode:
 
 ```js
-text(await tools.oneshot_subagent({
+const receipt = await tools.oneshot_subagent({
   name: "review-api",
   task: "Review src/api for correctness and missing tests. Do not edit files. Return findings with file paths and line numbers.",
-  timeout_seconds: 600,
-}));
+});
+// ... unrelated work ...
+text(await tools.subagent_jobs({ action: "result", job_id: receipt.details.jobId }));
 ```
 
 | Parameter | Default |
@@ -31,13 +37,92 @@ text(await tools.oneshot_subagent({
 | `provider` | Pi: parent provider when inheriting the model, otherwise requires explicit `model`; Claude: ignored, even without `model` |
 | `thinking` | Pi: parent level when inheriting the model, otherwise CLI default/suffix; Claude: compatibility alias for `effort` at common levels |
 | `effort` | Optional shared reasoning level: `low`, `medium`, `high`, `xhigh`, `max`; mapped to Pi `--thinking` or Claude `--effort` |
-| `timeout_seconds` | 600; range 1–3,600 |
+| `mode` | `background` (receipt now, answer via `subagent_jobs`) or `foreground` (wait for the answer) |
+| `timeout_seconds` | 1,800 in background, 600 in foreground; range 1–3,600 |
 
 Every call is a new session. The child does **not** inherit the parent's transcript:
 include context, constraints, paths, and deliverables in `task`. Pi inherits the
 local user's configuration, credentials, extensions, skills, and project context
 according to its normal headless loading/trust rules. Explicit CLI-only resources
 and temporary parent tool selection are not copied.
+
+## Background jobs
+
+A background launch returns once the child has published its PID. The receipt
+names the job ID (`job-` plus 12 hex digits) and its directory; it is not the
+child's answer and carries no usage. A launch failure is a tool error. Up to four
+background jobs may be active per session; launching a fifth is a tool error
+naming the active jobs (there is no queue).
+
+`subagent_jobs` operates only on jobs owned by the calling session:
+
+| `action` | Behavior |
+|---|---|
+| `list` | This session's jobs, newest first, with state and whether the result was retrieved |
+| `status` | One job's state |
+| `result` | A finished job's answer (40 KiB model limit, full-response path); a running job returns its state, not an error |
+| `wait` | Wait up to `timeout_seconds` (default 60, max 600) for `job_ids` (default: all running jobs), then return their results/states. Cancelling the wait never cancels the jobs |
+| `cancel` | Stop the job's process group; idempotent |
+
+A failed, timed-out, cancelled or interrupted job is returned as a tool error with
+its state, reason, any partial answer, the stderr tail, the job path, and a warning
+that the child may have left partial file changes in its working directory. Nothing
+is retried automatically.
+
+Child usage is reported to Pi once per job: the first `result`/`wait`/`cancel`
+response that returns a finished job carries its usage (partial for interrupted
+Claude runs), guarded by a durable `usage-delivered` marker. Usage of jobs whose
+result is never retrieved does not reach the session totals; `/agents` still
+shows per-job totals.
+
+While a session has running jobs or finished jobs whose result was not retrieved
+(or acknowledged in `/agents`), a short reminder listing them is appended as the
+last message of each model request. It is not saved to the session, so it
+survives compaction without changing the cached prompt prefix.
+
+When jobs finish, a short completion notice (state and job ID, not the answer) is
+added to the owning session with `triggerTurn: false`: immediately when idle, or
+after the current turn's tool results while the agent runs. It never starts a turn
+or steals focus. Notices are sent once, only while the owning session is active
+and the branch that launched the job is the current branch; otherwise they wait
+for that session's next start or for the branch to become active again. Batch
+completions are coalesced. Forks and other sessions never receive or control
+another session's jobs.
+
+The editor shows a one-line indicator while the session has running, unretrieved
+or unacknowledged jobs, for example `Agents  2 running · 1 ready · 1 failed`.
+`/jobs-indicator expanded` additionally lists up to three jobs with elapsed time,
+quiet time and recent activity; `/jobs-indicator compact` restores one line.
+Finished jobs leave the indicator once their result is retrieved by the model or
+acknowledged in `/agents`; a completion notice alone does not clear them.
+
+### Supervision and exit
+
+Each background job runs under its own detached supervisor
+(`node oneshot-subagent/supervisor.ts <root> <job-id>`, a new session without a
+terminal). The supervisor owns the launch, deadline, event parsing, result
+validation and `final-response.md`, using the same runner code as foreground runs.
+
+| Event | Background job |
+|---|---|
+| Turn ends, Esc, modal closes | Continues |
+| `/reload`, session switch, `/new`, `/resume`, fork | Continues; ownership stays with the launching session |
+| Pi exits, crashes or loses its terminal | Continues; results stay viewable in `/agents` |
+| Explicit cancel (`subagent_jobs` or `/agents`) | Process group stopped (SIGTERM, then SIGKILL) |
+| Deadline | Process group stopped; recorded as timed-out |
+| Supervisor killed with SIGTERM/SIGINT | Child stopped; recorded as interrupted |
+| Supervisor disappears | While the child still runs the job is shown as status unknown and remains cancellable; otherwise it is recorded as interrupted. Success is never inferred |
+
+Foreground runs keep the previous behavior: every `session_shutdown` (quit,
+reload, new, resume, fork) cancels them, as it cancels background launches not yet
+acknowledged. Accepted background jobs are never cancelled by shutdown. There is
+no exit prompt yet; cancel jobs from `/agents` or with `subagent_jobs` before
+exiting if they should not continue.
+
+The supervisor runs TypeScript directly with Node's built-in type stripping and
+loads nothing from Pi at runtime (`check:architecture` enforces this). Launching
+requires a Node.js with type stripping enabled by default (22.18+ or 23.6+);
+older versions are refused with an error.
 
 ## Model and effort selection
 
@@ -149,8 +234,8 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
 
 ## Lifecycle and failures
 
-- Esc / tool cancellation, timeout, or session shutdown terminates the child's
-  process group, including its tools, with SIGTERM then SIGKILL.
+- Foreground: Esc / tool cancellation, timeout, or session shutdown terminates the
+  child's process group, including its tools, with SIGTERM then SIGKILL.
 - Cancellation during launch waits for launch acknowledgement (up to 15 seconds)
   so the detached PID can be cleaned up.
 - Exit status 0 alone is not success: the JSON stream must settle without abort
@@ -168,11 +253,31 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
 - Responses over 40 KiB are truncated for model context, with a path to the full
   `final-response.md`. Expand shows the same bounded result; read the file for more.
 
-Private job directories remain under
+Foreground job directories remain under
 `${XDG_STATE_HOME:-~/.local/state}/agent-spawn/oneshot-*/<name>.*/`, with
 `events.jsonl`, `stderr.log`, `exit.status`, `pid`, and `final-response.md`.
-These files can contain sensitive prompts, tool arguments, and results. Remove
-them manually when no longer needed.
+Remove them manually when no longer needed.
+
+Background jobs live in private (`0700`/`0600`) directories under
+`${XDG_STATE_HOME:-~/.local/state}/agent-spawn/jobs/<job-id>/`:
+
+| File | Contents |
+|---|---|
+| `job.json` | Versioned request: name, backend/model, cwd, deadline, owner session/tool call/branch anchor |
+| `task.md` | The plain task (without the child notice), kept for `/agents` |
+| `status.json` | State, supervisor/child PID and start time, bounded activity snapshot, usage, terminal reason |
+| `cancel.request`, `marker.*` | Cancellation request; notified/delivered/usage-delivered/acknowledged markers |
+| `child/<name>.*/` | The agent-spawn job: `events.jsonl`, `stderr.log`, `pid`, `exit.status`, `final-response.md` |
+| `supervisor.log` | Supervisor diagnostics (Node warnings land here) |
+
+States: starting, running, cancelling, succeeded, failed, cancelled, timed-out,
+interrupted. Terminal results are immutable, and PID plus process start time are
+verified before any signal. Directories without this metadata, including earlier
+`oneshot-*` runs, are ignored. Retention is lazy, on listing: finished jobs whose
+result was retrieved or acknowledged are deleted after 14 days, and beyond the
+newest 200 finished jobs per session. Running jobs and unretrieved results are
+never pruned. These files can contain sensitive prompts, tool arguments and
+results.
 
 ## Permission boundary
 
@@ -181,7 +286,9 @@ configured tools (Pi may also use MCP; Claude MCP is disabled). Parent permissio
 prompts/tool restrictions are not forwarded. **Delegation remains available in
 Pi SAFE mode for both backends for now. SAFE does not make the child read-only.**
 The leaf rule and Claude leaf policy still apply. Switching modes does not
-revoke already-running children; cancel them first if needed.
+revoke already-running children, including background jobs that outlive the
+session; cancel them first if needed. Background execution is not a sandbox and
+not an interactive agent: a job cannot be messaged or resumed.
 
 Requires the repository launcher, Node.js, Bash, and Pi on PATH after the
 launcher's login shell initializes (Zsh by default), or Claude Code for
@@ -198,6 +305,7 @@ node --experimental-strip-types --test oneshot-subagent/*.test.ts
 bun run check
 ```
 
-The runner tests use the real launcher with fake login shells and fake Pi/Claude;
+The runner, supervisor and extension tests use the real launcher and detached
+supervisor with fake login shells and fake Pi/Claude (`fake-agents.fixture.ts`);
 they do not make model calls. Interactive rendering and live-provider calls
 still need a manual smoke test.

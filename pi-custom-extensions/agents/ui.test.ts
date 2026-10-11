@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { test } from "node:test";
+process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "agents-ui-state-"));
 import agentsExtension, { agentsOverlayOptions, picker } from "./index.ts";
 import { parseProcesses, run, type Agent } from "./tmux.ts";
 import { readStatus } from "./registry.ts";
@@ -153,13 +154,13 @@ test("lifecycle: factory starts no resources; start, working, idle, name change 
 });
 
 for (const active of [true, false]) {
-  test(`non-interactive section is read-only (${active ? "mixed list" : "no selectable agents"})`, async () => {
+  test(`headless rows are selectable for metadata only (${active ? "mixed list" : "no interactive agents"})`, async () => {
     const inactive: Agent[] = Array.from({ length: 8 }, (_, i) => ({
       provider: i % 2 ? "pi" : "claude", interactive: false,
       process: { ...agents[0].process, pid: 500 + i },
       metadata: { state: "busy", cwd: "/work/headless" },
     }));
-    const input = active ? [agents[0], ...inactive] : inactive;
+    const input = active ? [...inactive, agents[0]] : inactive;
     const ctx = {
       ui: {
         custom: async (factory: Factory) => {
@@ -174,22 +175,27 @@ for (const active of [true, false]) {
           await new Promise<void>((resolve) => setImmediate(resolve));
           try {
             const lines = component.render(140);
-            assert.ok(lines.some((line) => line.includes("Non-interactive (8) · read-only")));
             assert.ok(lines.some((line) => line.includes("PID 500")));
-            component.handleInput?.("\x1b[6~");
-            assert.ok(component.render(140).some((line) => line.includes("PID 502")));
-            component.handleInput?.("\x1b[5~");
-            assert.ok(component.render(140).some((line) => line.includes("PID 500")));
-            for (let i = 0; i < 12; i++) component.handleInput?.("j");
-            for (const key of ["\r", "V", "H", "\x1b[13;2u", ...(!active ? ["\x18"] : [])]) {
+            if (active) assert.ok(lines.findIndex((line) => line.includes("PID 101")) < lines.findIndex((line) => line.includes("PID 500")));
+            for (let i = 0; i < (active ? 1 : 0); i++) component.handleInput?.("j");
+            for (const key of ["V", "H", "\x1b[13;2u", "\x18"]) {
               component.handleInput?.(key);
-              if (active) {
-                assert.equal((result as { agent: Agent }).agent.process.pid, 101);
-              } else {
-                assert.equal(completed, false);
-              }
+              if (active) component.handleInput?.("n");
+              assert.equal(completed, false);
             }
-            if (!active) component.handleInput?.("\x1b");
+            assert.ok(component.render(140).some((line) => line.includes("No interactive tmux pane")) || active);
+            component.handleInput?.("\r");
+            assert.equal(completed, false);
+            assert.ok(component.render(140).some((line) => line.includes("only process metadata")));
+            component.handleInput?.("\x1b");
+            if (active) {
+              component.handleInput?.("k");
+              component.handleInput?.("\r");
+              assert.equal((result as { agent: Agent }).agent.process.pid, 101);
+            } else {
+              assert.equal(completed, false);
+              component.handleInput?.("\x1b");
+            }
             return result;
           } finally { component.dispose?.(); }
         },
