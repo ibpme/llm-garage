@@ -1,6 +1,6 @@
 import { readStoredCredential, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { openPager, textSource } from "../shared/pager.ts";
-import { formatUsage } from "./formatting.ts";
+import { openPager, type PagerSource } from "../shared/pager.ts";
+import { formatUsage, plainTheme, renderUsage } from "./formatting.ts";
 import { PROVIDERS, UsageError } from "./providers.ts";
 import { collectUsage, selectProviders } from "./service.ts";
 
@@ -32,11 +32,23 @@ export default function usageExtension(pi: ExtensionAPI) {
           readCredential: readStoredCredential,
         }, controller.signal);
         if (controller.signal.aborted) return;
-        const text = formatUsage(reports);
+        // Countdowns are fixed at lookup time, not when the viewer is opened or resized.
+        const capturedAt = Date.now();
         if (ctx.mode === "rpc") {
-          ctx.ui.notify(text, "info");
+          ctx.ui.notify(formatUsage(reports, capturedAt), "info");
         } else {
-          await openPager(ctx, { title: "Account Usage", source: textSource(text), plainText: text });
+          const source: PagerSource = {
+            lines: (width) => renderUsage(reports, {
+              now: capturedAt,
+              theme: ctx.mode === "tui" ? ctx.ui.theme : plainTheme,
+              width,
+            }),
+          };
+          await openPager(ctx, {
+            title: "Account Usage",
+            source,
+            plainText: formatUsage(reports, capturedAt),
+          });
         }
       } catch (error) {
         ctx.ui.notify(error instanceof UsageError ? error.message : "Usage lookup failed.", "warning");

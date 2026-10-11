@@ -18,8 +18,9 @@ only, avoiding a duplicate companion report. Explicit provider selection works
 without changing the session model. One provider's failure does not hide the
 others.
 
-Reports show **used** and **remaining** percentages, local reset timestamps,
-and a countdown captured at lookup time. Passed reset times do not imply that
+Each quota is one line: a severity-colored bar, **used** and **left** percentages,
+and a reset countdown captured at lookup time (the local timestamp is dropped when
+the viewer is narrow). Passed reset times do not imply that
 usage has returned to zero. The TUI opens a scrollable viewer; Esc/q closes it.
 RPC uses a notification, and print/JSON modes use plain console output, following
 the shared pager convention. No report is added to model context or saved.
@@ -97,7 +98,7 @@ a link to https://platform.openai.com/usage. No subscription endpoint is probed.
 | `index.ts` | Command registration, lifecycle, presentation |
 | `service.ts` | Provider selection, auth boundaries, HTTP, companion orchestration |
 | `providers.ts` | Response normalization and report types |
-| `formatting.ts` | Plain-text usage report |
+| `formatting.ts` | Themed usage report: eighth-block bars colored by severity (<60% green, 60–85% amber, ≥85% red); plain text for RPC and print |
 | `*.test.ts` | Synthetic provider/auth/HTTP fixtures and Pi auth integration |
 
 Run from `pi-custom-extensions/`:

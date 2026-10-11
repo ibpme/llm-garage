@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseCodex, parseOpenCodeGo, safeText, verifyAppRegistration, windowDuration } from "./providers.ts";
-import { countdown, formatUsage } from "./formatting.ts";
+import { countdown, formatUsage, renderUsage, usageBar } from "./formatting.ts";
 
 test("OpenCode Go preserves percentages, reset times, and rate-limited windows", () => {
   const report = parseOpenCodeGo({ usage: {
@@ -85,11 +85,31 @@ test("duration and countdown formatting handle boundaries", () => {
 test("report distinguishes account usage, unavailable values, remaining percentages, and stale resets", () => {
   const report = parseOpenCodeGo({ usage: { rolling: { status: "rate-limited", percent: 100, resetsAt: "2030-01-01T00:00:00Z" } } });
   const text = formatUsage([report], Date.parse("2030-01-02T00:00:00Z"));
-  assert.match(text, /100% used · 0% remaining/);
-  assert.match(text, /Rate limited/);
+  assert.match(text, /100% used · 0% left/);
+  assert.match(text, /rate limited/);
   assert.match(text, /reset time passed/);
-  assert.match(text, /Weekly\n  Usage unavailable/);
+  assert.match(formatUsage([{ ...report, windows: [{ label: "Weekly", note: "Usage unavailable (missing or unknown window status)." }] }]), /Weekly +Usage unavailable/);
   assert.match(formatUsage([]), /No supported providers/);
+});
+
+test("usage bars keep a fixed width and take color from severity", () => {
+  const tagged = { fg: (color: string, text: string) => `<${color}>${text}</>`, bold: (text: string) => text };
+  assert.match(usageBar(10, tagged), /^<success>█▊<\/>/);
+  assert.match(usageBar(70, tagged), /^<warning>/);
+  assert.match(usageBar(90, tagged), /^<error>/);
+  for (const used of [0, 0.5, 33.3, 99.9, 100]) {
+    assert.equal(usageBar(used, { fg: (_c, text) => text, bold: (text) => text }).length, 18);
+  }
+});
+
+test("styled report wraps long notes to the viewport and keeps one line per quota window", () => {
+  const report = parseCodex({ plan_type: "plus", rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } });
+  const styled = { fg: (_color: string, text: string) => `\u001b[31m${text}\u001b[0m`, bold: (text: string) => text };
+  const lines = renderUsage([{ ...report, notes: ["word ".repeat(60).trim()] }], { theme: styled, width: 80, now: 0 });
+  assert.ok(lines.every((line) => line.replace(/\u001b\[[0-9;]*m/g, "").length <= 80));
+  assert.equal(lines.filter((line) => line.includes("5h")).length, 1);
+  assert.ok(lines.filter((line) => line.includes("ℹ") || line.startsWith("    ")).length >= 2);
+  assert.match(lines.join("\n"), /\u001b\[31m/);
 });
 
 test("remote text cannot inject terminal escape sequences, newlines, or bidi controls", () => {
