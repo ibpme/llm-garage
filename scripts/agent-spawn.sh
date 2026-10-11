@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: agent-spawn.sh --name NAME [--prompt TEXT | --prompt-file PATH] [options]
 
-Start Pi in tmux (interactive) or Pi/Claude as a detached job (JSON).
+Start Pi (interactive) or Pi/Claude (JSON) in detached tmux sessions.
 JSON requires a prompt; Claude supports JSON mode only.
 
 Options:
@@ -50,6 +50,7 @@ if [[ ${1:-} == --run ]]; then
   job_dir=$4
   agent=$5
   shift 5
+  [[ $mode != json ]] || printf '%s\n' "$$" > "$job_dir/pid"
   cd "$cwd" || exit 1
   [[ $agent == pi || $agent == claude ]] || fail 'invalid internal agent'
   agent_bin=$(command -v "$agent") || {
@@ -133,11 +134,9 @@ fi
 [[ -z $prompt_file || -f $prompt_file && -r $prompt_file ]] || fail 'prompt file is not readable'
 [[ -d $cwd ]] || fail 'working directory does not exist'
 cwd=$(cd "$cwd" && pwd -P)
-if [[ $mode == interactive ]]; then
-  command -v tmux >/dev/null 2>&1 || fail 'tmux is not installed'
-else
+command -v tmux >/dev/null 2>&1 || fail 'tmux is not installed'
+if [[ $mode == json ]]; then
   [[ -z $socket ]] || fail '--socket is only available with interactive mode'
-  node_bin=$(command -v node) || fail 'node is required for detached JSON jobs'
 fi
 [[ $shell == bash || $shell == zsh || $shell == */bash || $shell == */zsh ]] \
   || fail '--shell must select bash or zsh'
@@ -188,30 +187,15 @@ else
 fi
 
 if [[ $mode == json ]]; then
-  # A separate session isolates the job from Pi's bash-tool process-group cleanup.
-  "$node_bin" - "$job_dir" "$cwd" "$shell_bin" "$bash_bin" "$script" "${agent_args[@]}" <<'JS' \
-    || fail_launch 'could not create detached JSON job'
-const { spawn } = require('node:child_process');
-const { openSync, closeSync, writeFileSync } = require('node:fs');
-const [jobDir, cwd, shell, bash, script, ...args] = process.argv.slice(2);
-const out = openSync(`${jobDir}/launch.log`, 'a');
-const err = openSync(`${jobDir}/stderr.log`, 'a');
-const child = spawn(shell, ['-lic', 'exec "$@"', 'agent-spawn-shell', bash, script, ...args], {
-  cwd,
-  detached: true,
-  stdio: ['ignore', out, err],
-});
-closeSync(out);
-closeSync(err);
-child.once('error', (error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
-child.once('spawn', () => {
-  writeFileSync(`${jobDir}/pid`, `${child.pid}\n`);
-  child.unref();
-});
-JS
+  # Unique sessions allow concurrent jobs with the same label.
+  session="$name-${job_dir##*.}"
+  printf '%s\n' "$session" > "$job_dir/tmux.session"
+  # Redirect before login-shell initialization so startup output is logged too.
+  "${tmux_cmd[@]}" new-session -d -s "$session" -c "$cwd" "$bash_bin" -c \
+    'job_dir=$1; shift; exec "$@" </dev/null >"$job_dir/launch.log" 2>>"$job_dir/stderr.log"' \
+    agent-spawn-job "$job_dir" "$shell_bin" -lic 'exec "$@"' \
+    agent-spawn-shell "$bash_bin" "$script" "${agent_args[@]}" \
+    || fail_launch 'could not create detached JSON tmux session'
 else
   # Prompt text stays in a private file, never in shell syntax.
   "${tmux_cmd[@]}" new-session -d -s "$name" -c "$cwd" "$shell_bin" -lic \
@@ -224,7 +208,7 @@ for (( i=0; i<30; i++ )); do
   if [[ -f $status_dir/started ]]; then started=1; break; fi
   if [[ $mode == json ]]; then
     [[ ! -f $status_dir/error ]] || break
-    kill -0 "$(cat "$job_dir/pid")" 2>/dev/null || break
+    "${tmux_cmd[@]}" has-session -t "=$session" 2>/dev/null || break
   elif ! "${tmux_cmd[@]}" has-session -t "=$name" 2>/dev/null; then
     break
   fi

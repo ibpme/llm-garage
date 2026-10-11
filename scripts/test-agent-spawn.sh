@@ -2,12 +2,16 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd -P)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+real_tmux=$(command -v tmux)
+export TEST_TMUX_SOCKET="$tmp/tmux.sock" TEST_REAL_TMUX="$real_tmux"
+trap '"$real_tmux" -S "$TEST_TMUX_SOCKET" kill-server 2>/dev/null || :; rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/login-bin" "$tmp/work"
 # Skip real login profiles while preserving the launcher's argv contract.
 cat > "$tmp/bin/bash" <<'SH'
 #!/bin/bash
 if [[ ${1:-} == -lic ]]; then
+  printf 'login stdout\n'
+  printf 'login stderr\n' >&2
   export PATH="$TEST_LOGIN_BIN:$PATH"
   shift 3
   exec "$@"
@@ -21,7 +25,7 @@ printf '%s\n' "${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-unset}" > "$TEST_ADVISOR"
 sleep 1
 printf '{"type":"test"}\n'
 printf 'test stderr\n' >&2
-exit "${TEST_EXIT:-0}"
+exit "$(cat "$TEST_EXIT_FILE")"
 SH
 # Claude is only discoverable after the login shell initializes PATH.
 cat > "$tmp/login-bin/claude" <<'SH'
@@ -31,19 +35,19 @@ printf '%s\n' "${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-unset}" > "$TEST_ADVISOR"
 sleep 1
 printf '{"type":"claude-test"}\n'
 printf 'claude test stderr\n' >&2
-exit "${TEST_EXIT:-0}"
+exit "$(cat "$TEST_EXIT_FILE")"
 SH
 cat > "$tmp/bin/tmux" <<'SH'
 #!/bin/bash
-printf 'tmux must not be invoked for JSON\n' >&2
-exit 99
+exec "$TEST_REAL_TMUX" -S "$TEST_TMUX_SOCKET" -f /dev/null "$@"
 SH
 chmod +x "$tmp/bin/"* "$tmp/login-bin/claude"
 export PATH="$tmp/bin:$PATH" TEST_ARGS="$tmp/args" TEST_LOGIN_BIN="$tmp/login-bin"
+export TEST_EXIT_FILE="$tmp/exit-code"
 export TEST_ADVISOR="$tmp/advisor" CLAUDE_CODE_DISABLE_ADVISOR_TOOL=0
 prompt='Literal $(touch unwanted) ; "quoted" prompt'
 for code in 0 7; do
-  export TEST_EXIT=$code
+  printf '%s\n' "$code" > "$TEST_EXIT_FILE"
   output=$(cd "$tmp" && /bin/bash "$root/scripts/agent-spawn.sh" \
     --name test --mode json --shell bash --cwd "$tmp/work" \
     --output-dir jobs --prompt "$prompt")
@@ -52,7 +56,13 @@ for code in 0 7; do
   pid=$(cat "$job/pid")
   kill -0 "$pid"
   pgid=$(ps -o pgid= -p "$pid" | tr -d ' ')
-  [[ $pgid == "$pid" ]]
+  caller_pgid=$(ps -o pgid= -p "$$" | tr -d ' ')
+  [[ $pgid != "$caller_pgid" ]]
+  if [[ ! -f $job/tmux.session ]]; then
+    echo 'Expected JSON job to record its detached tmux session' >&2
+    exit 1
+  fi
+  tmux has-session -t "=$(cat "$job/tmux.session")"
   for ((i=0; i<50; i++)); do
     [[ ! -f $job/exit.status ]] || break
     sleep 0.1
@@ -63,6 +73,8 @@ for code in 0 7; do
   diff -u "$tmp/expected" "$TEST_ARGS"
   grep -Fx '{"type":"test"}' "$job/events.jsonl" >/dev/null
   grep -Fx 'test stderr' "$job/stderr.log" >/dev/null
+  grep -Fx 'login stdout' "$job/launch.log" >/dev/null
+  grep -Fx 'login stderr' "$job/stderr.log" >/dev/null
   [[ ! -e $tmp/work/unwanted ]]
 done
 if /bin/bash "$root/scripts/agent-spawn.sh" --name test --mode json \
@@ -80,8 +92,36 @@ wait_for_job() {
   [[ -f $job/exit.status ]]
 }
 
+# Reusing a label must not collide with an already-running JSON session.
+printf '0\n' > "$TEST_EXIT_FILE"
+output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name concurrent --mode json \
+  --shell bash --cwd "$tmp/work" --output-dir "$tmp/jobs" --prompt test)
+first_job=${output##*Files: }
+output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name concurrent --mode json \
+  --shell bash --cwd "$tmp/work" --output-dir "$tmp/jobs" --prompt test)
+second_job=${output##*Files: }
+[[ $first_job != "$second_job" ]]
+[[ $(cat "$first_job/tmux.session") != "$(cat "$second_job/tmux.session")" ]]
+tmux has-session -t "=$(cat "$first_job/tmux.session")"
+tmux has-session -t "=$(cat "$second_job/tmux.session")"
+wait_for_job "$first_job"
+wait_for_job "$second_job"
+[[ $(cat "$first_job/exit.status") == 0 && $(cat "$second_job/exit.status") == 0 ]]
+
+# Interactive sessions still use their requested name and reject duplicates.
+/bin/bash "$root/scripts/agent-spawn.sh" --name interactive --shell bash \
+  --cwd "$tmp/work" > "$tmp/interactive-launch"
+tmux has-session -t '=interactive'
+if /bin/bash "$root/scripts/agent-spawn.sh" --name interactive --shell bash \
+  --cwd "$tmp/work" > "$tmp/error" 2>&1; then
+  echo 'Expected duplicate interactive session rejection' >&2
+  exit 1
+fi
+grep -F "already exists" "$tmp/error" >/dev/null
+tmux kill-session -t '=interactive'
+
 # Pi's optional arguments retain their exact ordering and values.
-export TEST_EXIT=0
+printf '0\n' > "$TEST_EXIT_FILE"
 output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name pi-options \
   --mode json --shell bash --cwd "$tmp/work" --output-dir "$tmp/jobs" \
   --model 'provider/model:literal' --provider provider --thinking high --prompt "$prompt")
@@ -111,7 +151,7 @@ grep -Fx '{"type":"claude-test"}' "$job/events.jsonl" >/dev/null
 grep -Fx 'claude test stderr' "$job/stderr.log" >/dev/null
 
 for effort in low medium high xhigh max; do
-  export TEST_EXIT=7
+  printf '7\n' > "$TEST_EXIT_FILE"
   output=$(/bin/bash "$root/scripts/agent-spawn.sh" --name "claude-$effort" \
     --agent claude --mode json --shell bash --cwd "$tmp/work" \
     --output-dir "$tmp/jobs" --provider ignored --model 'literal/model:unchanged' \
@@ -129,7 +169,8 @@ done
 # The internal non-JSON execution path preserves advisor configuration for
 # future regular Claude launches, even though the public CLI is JSON-only today.
 mkdir -p "$tmp/interactive-status"
-TEST_EXIT=0 PATH="$tmp/login-bin:$PATH" /bin/bash "$root/scripts/agent-spawn.sh" \
+printf '0\n' > "$TEST_EXIT_FILE"
+PATH="$tmp/login-bin:$PATH" /bin/bash "$root/scripts/agent-spawn.sh" \
   --run "$tmp/interactive-status" "$tmp/work" interactive '' claude \
   > "$tmp/interactive-output" 2> "$tmp/interactive-error"
 [[ $(cat "$TEST_ADVISOR") == 0 ]]

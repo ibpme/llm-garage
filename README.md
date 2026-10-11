@@ -76,8 +76,11 @@ repository, and later syncs preserve the user's local preference.
 
 ## Detached agent launcher
 
+See the [launcher README](scripts/README.md) for requirements, all options,
+job lifecycle, permissions, troubleshooting, and tests.
+
 `scripts/agent-spawn.sh` starts interactive Pi in a detached tmux session, or
-a one-shot Pi/Claude JSON event stream in a detached process without tmux.
+a one-shot Pi/Claude JSON event stream in a detached tmux session.
 Claude is JSON-only and uses the leaf policy in the extension README.
 
 ```bash
@@ -105,8 +108,8 @@ starts an interactive login shell before Pi, so its startup files can set the
 agent's environment. Shell names are resolved on `PATH`, or supply an absolute
 path such as `--shell /usr/local/bin/zsh`; Bash is required to run the launcher.
 Optional `--provider` requires `--model` for Pi and is ignored for Claude; `--socket` selects a non-default tmux
-server (interactive mode only). JSON launches require Node.js, record the wrapper
-PID in `pid`, and redirect shell startup output to `launch.log`. Interactive launches confirm the process stays running briefly;
+server (interactive mode only). Both modes require tmux. JSON launches record the wrapper
+PID in `pid` and session name in `tmux.session`, and redirect shell startup output to `launch.log`. Interactive launches confirm the process stays running briefly;
 JSON launches report startup separately from Pi's eventual exit status. Run
 `./scripts/agent-spawn.sh --help` for the full interface.
 
