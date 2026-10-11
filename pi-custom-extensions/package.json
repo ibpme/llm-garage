@@ -32,6 +32,7 @@
       "./status-line.ts",
       "./stylish-tools/index.ts",
       "./system-prompt.ts",
+      "./thinking-cycle-backward.ts",
       "./thinking-style.ts",
       "./tool-call-stats/index.ts",
       "./tool-set/index.ts",

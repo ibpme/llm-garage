@@ -4,5 +4,8 @@
   ],
   "extensions.suggestions.toggle": [
     "ctrl+shift+s"
+  ],
+  "extensions.thinking.cycleBackward": [
+    "shift+left"
   ]
 }

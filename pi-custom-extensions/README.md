@@ -334,3 +334,18 @@ keys replaces the default; `[]` disables the shortcut. Missing or malformed
 configuration falls back to Ctrl+Shift+S. Run `/reload` after changes.
 The extension respects `PI_AGENT_DIR`. Tab accept, Esc dismiss, and the
 `/suggestions [on|off]` command are unchanged.
+
+### Backward thinking-level cycling
+
+`thinking-cycle-backward.ts` registers **Shift+Left** to cycle backward through
+the current model's supported thinking levels, wrapping from the lowest to the
+highest. It leaves forward cycling unchanged (**Shift+Right** in the canonical
+keybindings). Models without reasoning support show an informational notice
+without changing the level. Run `/reload` to load the shortcut.
+
+Configure `extensions.thinking.cycleBackward` in
+`pi-custom-keybinds/keybindings.json` (synced to Pi’s agent directory). A key
+string or array replaces Shift+Left; `[]` disables the shortcut. Missing or
+malformed configuration falls back to Shift+Left. The extension uses Pi’s
+`getAgentDir()` so custom agent directories are respected. Run `/reload` after
+changing the binding.
