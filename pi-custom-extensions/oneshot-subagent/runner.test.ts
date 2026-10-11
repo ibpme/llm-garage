@@ -27,7 +27,7 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
   for (const name of ["bash", "zsh"]) await writeFile(join(bin, name), shell, { mode: 0o755 });
   await writeFile(join(bin, "pi"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, legacyContext: process.env.PI_ONESHOT_SUBAGENT_CONTEXT, cwd: process.cwd() }));
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, cwd: process.cwd() }));
 const mode = process.env.ONESHOT_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
@@ -48,7 +48,7 @@ else {
 `, { mode: 0o755 });
   await writeFile(join(bin, "claude"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, legacyContext: process.env.PI_ONESHOT_SUBAGENT_CONTEXT }));
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD }));
 const mode = process.env.ONESHOT_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
@@ -85,7 +85,6 @@ else {
       assert.ok(updates.length > 0);
       const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
       assert.equal(captured.child, "1");
-      assert.equal(captured.legacyContext, undefined);
       assert.deepEqual(captured.args, ["--mode", "json", "--model", "model-id", "--provider", "provider", "--thinking", "high", "--", CHILD_NOTICE + options().task]);
       assert.equal(outcome.details.task, options().task);
       assert.deepEqual(await readdir(dirname(outcome.details.jobDir!)), [outcome.details.jobDir!.split("/").at(-1)], "one job directory and no run markers or children");
@@ -143,7 +142,6 @@ else {
       assert.ok(previews.some((preview) => preview.startsWith("Live")));
       const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
       assert.equal(captured.child, "1");
-      assert.equal(captured.legacyContext, undefined);
       assert.ok(captured.args.includes("--effort"));
       assert.ok(captured.args.includes("high"));
       assert.ok(!captured.args.includes("--provider"));

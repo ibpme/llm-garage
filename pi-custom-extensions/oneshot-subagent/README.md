@@ -122,10 +122,9 @@ delegation off, disable the extension in Pi. A leftover
 The runner launches children with `PI_ONESHOT_SUBAGENT_CHILD=1`, and a child does
 not register `oneshot_subagent` at all. On `session_start` a child appends an
 `oneshot-subagent-role` session entry, so reload, resume, and fork restore the
-role without the environment. Compatibility with earlier versions fails closed:
-the old `PI_ONESHOT_SUBAGENT_CONTEXT` variable, an `oneshot-subagent-context`
-entry with depth above 0, and malformed entries all mean child. Old depth-0
-entries remain roots. A child's task is prefixed with a short note that it cannot
+role without the environment. Sessions from the earlier depth-budget versions are
+not migrated: their `oneshot-subagent-context` entries are ignored, so a resumed
+old child session loads as a root. A child's task is prefixed with a short note that it cannot
 delegate.
 
 The marker means "one-shot child", not "any spawned agent": only this runner sets

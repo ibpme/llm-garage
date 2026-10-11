@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { oneLine, type RunDetails } from "./events.ts";
 import { renderRun } from "./rendering.ts";
 import { runSubagent } from "./runner.ts";
-import { envRole, hasRoleEntry, LEGACY_ENTRY, restoreRole, ROLE_ENTRY, type Role, type SavedEntry } from "./role.ts";
+import { envRole, hasRoleEntry, restoreRole, ROLE_ENTRY, type Role, type SavedEntry } from "./role.ts";
 import { EFFORT_LEVELS, resolveBackend } from "./backend.ts";
 
 const TOOL_NAME = "oneshot_subagent";
@@ -22,7 +22,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     const saved: SavedEntry[] = ctx.sessionManager.getEntries().flatMap((entry) =>
-      entry.type === "custom" && (entry.customType === ROLE_ENTRY || entry.customType === LEGACY_ENTRY)
+      entry.type === "custom" && entry.customType === ROLE_ENTRY
         ? [{ customType: entry.customType, data: entry.data }] : []);
     role = restoreRole(baseRole, saved);
     // Register only once the role is known: a tool cannot be unregistered, and a
