@@ -116,8 +116,7 @@ main agent (root) -> one-shot child (leaf)
 ```
 
 Every child, Pi or Claude, is a leaf. There is no depth setting; to turn
-delegation off, disable the extension in Pi. A leftover
-`<Pi agent directory>/oneshot-subagent.json` from earlier versions is ignored.
+delegation off, disable the extension in Pi.
 
 The runner launches children with `PI_ONESHOT_SUBAGENT_CHILD=1`, and a child does
 not register `oneshot_subagent` at all. On `session_start` a child appends an
