@@ -8,6 +8,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { EventState, type RunDetails } from "./events.ts";
 import { CHILD_ENV } from "./role.ts";
 import { ClaudeEventState } from "./claude-events.ts";
+import type { ContextWindowResolver } from "./context-window.ts";
 import { resolveBackend, type Agent, type Effort } from "./backend.ts";
 
 export interface RunOptions {
@@ -24,6 +25,8 @@ export interface RunOptions {
   signal: AbortSignal;
   onProgress: (details: RunDetails) => void;
   outputRoot?: string;
+  /** Pi only: verified capacity lookup for the completed child call's model. */
+  contextWindowFor?: ContextWindowResolver;
 }
 
 // Advisory only: a child with shell access can still launch other agents.
@@ -98,7 +101,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
   const started = Date.now();
   const details: RunDetails = { name: options.name, task: options.task, cwd: options.cwd,
     agent: options.agent ?? "pi", model: options.model, status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
-  const state = options.agent === "claude" ? new ClaudeEventState(details) : new EventState(details);
+  const state = options.agent === "claude" ? new ClaudeEventState(details) : new EventState(details, options.contextWindowFor);
   let runDir: string | undefined;
   let jobDir: string | undefined;
   let completed = false;

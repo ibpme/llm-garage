@@ -181,3 +181,79 @@ test("a run whose only data is terminal totals has no latest call", () => {
   assert.equal(s.usage.totalTokens, 3);
   assert.equal(s.details.latestCallUsage, undefined);
 });
+
+const startWithModel = (id: string, model: string, usage: unknown) =>
+  event({ type: "stream_event", event: { type: "message_start", message: { id, model, usage } } });
+const modelWindow = (contextWindow: unknown) => ({ inputTokens: 1, outputTokens: 1, contextWindow });
+
+test("Claude capacity is unknown while streaming and verified only by the terminal modelUsage entry for the last call's model", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 5, output_tokens: 1 }, { model: "claude-haiku-5-5" }));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(5, 1, 0, 0));
+  assert.equal(s.details.contextWindow, undefined);
+  s.feed(event(result({ modelUsage: { "claude-haiku-5-5": modelWindow(200_000) } })));
+  assert.equal(s.details.contextWindow, 200_000);
+});
+
+test("Claude helper models in modelUsage never supply the last call's capacity and are never summed", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 5, output_tokens: 1 }, { model: "claude-sonnet-5" }));
+  s.feed(event(result({ modelUsage: { "claude-sonnet-5": modelWindow(200_000), "claude-haiku-5-5": modelWindow(1_000_000) } })));
+  assert.equal(s.details.contextWindow, 200_000);
+  const helperOnly = state();
+  helperOnly.feed(completed("m1", { input_tokens: 5, output_tokens: 1 }, { model: "claude-sonnet-5" }));
+  helperOnly.feed(event(result({ modelUsage: { "claude-haiku-5-5": modelWindow(1_000_000) } })));
+  assert.equal(helperOnly.details.contextWindow, undefined);
+});
+
+test("Claude capacity is unknown when the last call's model is missing from modelUsage or lacks a positive window", () => {
+  for (const entry of [undefined, modelWindow(0), modelWindow(-1), modelWindow("200000"), { inputTokens: 1 }]) {
+    const s = state();
+    s.feed(completed("m1", { input_tokens: 5 }, { model: "claude-sonnet-5" }));
+    s.feed(event(result({ modelUsage: { "other-model": modelWindow(1_000_000), ...(entry ? { "claude-sonnet-5": entry } : {}) } })));
+    assert.equal(s.details.contextWindow, undefined, JSON.stringify(entry));
+  }
+});
+
+test("a newer completed call without model identity cannot inherit an older call's capacity", () => {
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 5 }, { model: "claude-sonnet-5" }));
+  s.feed(completed("m2", { input_tokens: 7 }));
+  s.feed(event(result({ modelUsage: { "claude-sonnet-5": modelWindow(200_000) } })));
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(7, 0, 0, 0));
+  assert.equal(s.details.contextWindow, undefined);
+});
+
+test("streamed calls take their model identity from message_start and are verified at the result", () => {
+  const s = state();
+  s.feed(startWithModel("m1", "claude-haiku-5-5", { input_tokens: 5, cache_read_input_tokens: 2 }));
+  s.feed(delta({ output_tokens: 3 }));
+  s.feed(stop());
+  assert.equal(s.details.contextWindow, undefined);
+  s.feed(event(result({ modelUsage: { "claude-haiku-5-5": modelWindow(200_000) } })));
+  assert.equal(s.details.contextWindow, 200_000);
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(5, 3, 2, 0));
+});
+
+test("an interrupted Claude run has no verified capacity, and a result never changes it afterward", () => {
+  const interrupted = state();
+  interrupted.feed(completed("m1", { input_tokens: 5 }, { model: "claude-haiku-5-5" }));
+  assert.equal(interrupted.details.contextWindow, undefined);
+  const s = state();
+  s.feed(completed("m1", { input_tokens: 5 }, { model: "claude-haiku-5-5" }));
+  s.feed(event(result({ modelUsage: { "claude-haiku-5-5": modelWindow(200_000) } })));
+  s.feed(completed("m9", { input_tokens: 1 }, { model: "claude-sonnet-5" }));
+  assert.equal(s.details.contextWindow, 200_000);
+  assert.deepEqual(s.details.latestCallUsage, callBreakdown(5, 0, 0, 0));
+});
+
+test("capacity resolution leaves Claude cumulative totals and cost unchanged", () => {
+  const withWindow = state();
+  const without = state();
+  const modelUsage = { "claude-haiku-5-5": { inputTokens: 700, outputTokens: 300, cacheReadInputTokens: 10, cacheCreationInputTokens: 2 } };
+  for (const s of [withWindow, without]) s.feed(completed("m1", { input_tokens: 10, output_tokens: 1 }, { model: "claude-haiku-5-5" }));
+  withWindow.feed(event(result({ modelUsage: { "claude-haiku-5-5": { ...modelUsage["claude-haiku-5-5"], contextWindow: 200_000 } } })));
+  without.feed(event(result({ modelUsage })));
+  assert.deepEqual(withWindow.usage, without.usage);
+  assert.equal(withWindow.usage.totalTokens, 1012);
+});

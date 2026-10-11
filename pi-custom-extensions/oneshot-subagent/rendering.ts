@@ -1,27 +1,47 @@
 import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text, truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { contextSegment, type Tone } from "./context-usage.ts";
 import { oneLine, type RunDetails } from "./events.ts";
 
 const count = (value: number) => value.toLocaleString("en-US");
 
-export function stats(details: RunDetails): string {
+interface Segment { text: string; tone?: Tone }
+
+// Segments default to dim; only the context segment carries its own warning or error tone.
+function segments(details: RunDetails): Segment[] {
   const latest = details.latestCallUsage;
   // Pi and Claude show only the latest completed call; cumulative totals are accounting metadata.
   // Legacy results without an agent discriminator keep their saved total.
   const cumulative = !latest && details.agent === undefined && details.totalTokens
-    ? ` · ${count(details.totalTokens)} tokens${details.usagePartial ? " (partial)" : ""}` : "";
+    ? `${count(details.totalTokens)} tokens${details.usagePartial ? " (partial)" : ""}` : undefined;
   const lastCall = latest
-    ? ` · last call: ↓ ${count(latest.input)} input · ↑ ${count(latest.output)} output · cached ${count(latest.cacheRead + latest.cacheWrite)}`
-    : "";
-  return `${(details.durationMs / 1000).toFixed(1)}s · ${details.turns} turns · ${details.toolCalls} tool calls` +
-    lastCall + cumulative + (details.costUsd ? ` · $${details.costUsd.toFixed(4)}` : "");
+    ? `last call: ↓ ${count(latest.input)} input · ↑ ${count(latest.output)} output · cached ${count(latest.cacheRead + latest.cacheWrite)}`
+    : undefined;
+  const context = contextSegment(details);
+  return [
+    { text: `${(details.durationMs / 1000).toFixed(1)}s` },
+    { text: `${details.turns} turns` },
+    { text: `${details.toolCalls} tool calls` },
+    ...(lastCall ? [{ text: lastCall }] : []),
+    ...(context ? [context] : []),
+    ...(cumulative ? [{ text: cumulative }] : []),
+    ...(details.costUsd ? [{ text: `$${details.costUsd.toFixed(4)}` }] : []),
+  ];
+}
+
+export function stats(details: RunDetails): string {
+  return segments(details).map((segment) => segment.text).join(" · ");
+}
+
+function statsLine(details: RunDetails, theme: Theme): string {
+  return segments(details).map((segment) => theme.fg(segment.tone ?? "dim", segment.text)).join(theme.fg("dim", " · "));
 }
 
 export function renderRun(details: RunDetails, expanded: boolean, theme: Theme): Component {
   const running = details.status === "running";
   const tone = details.status === "success" ? "success" : details.status === "error" ? "error" : "warning";
   const icon = running ? "◌" : details.status === "success" ? "✓" : details.status === "aborted" ? "■" : "✗";
-  const header = `${theme.fg(tone, `${icon} ${details.status}`)} ${theme.fg("dim", stats(details))}`;
+  const header = `${theme.fg(tone, `${icon} ${details.status}`)} ${statsLine(details, theme)}`;
   const activity = details.activity.slice(expanded ? 0 : -4);
   const children: Component[] = [new Text(header, 0, 0)];
   if (expanded) {

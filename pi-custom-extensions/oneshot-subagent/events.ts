@@ -2,6 +2,7 @@ import type { Usage } from "@earendil-works/pi-ai";
 import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { JsonEventStream } from "./json-stream.ts";
 import type { Agent } from "./backend.ts";
+import type { ContextWindowResolver } from "./context-window.ts";
 
 /** Token breakdown of the most recent completed Pi or Claude model call; display only. */
 export interface LatestCallUsage {
@@ -29,6 +30,8 @@ export interface RunDetails {
   /** Cumulative accounting for Pi and Claude; not displayed (see latestCallUsage). */
   totalTokens?: number;
   latestCallUsage?: LatestCallUsage;
+  /** Verified capacity of the latest call's model; absent when unknown. Display only. */
+  contextWindow?: number;
   usagePartial?: boolean;
   costUsd?: number;
   /** Only present in results saved by versions that supported nested delegation. */
@@ -54,10 +57,14 @@ export class EventState {
   settled = false;
   aborted = false;
   private readonly stream = new JsonEventStream((event) => this.accept(event as JsonAgentSessionEvent));
+  private readonly contextWindowFor?: ContextWindowResolver;
 
   readonly details: RunDetails;
 
-  constructor(details: RunDetails) { this.details = details; }
+  constructor(details: RunDetails, contextWindowFor?: ContextWindowResolver) {
+    this.details = details;
+    this.contextWindowFor = contextWindowFor;
+  }
 
   feed(chunk: string, eof = false): void {
     this.stream.feed(chunk, eof);
@@ -100,6 +107,8 @@ export class EventState {
             cacheRead: message.usage.cacheRead ?? 0,
             cacheWrite: message.usage.cacheWrite ?? 0,
           };
+          this.details.contextWindow = message.usage && message.provider && message.model
+            ? this.contextWindowFor?.(message.provider, message.model) : undefined;
           this.finalText = message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
           this.details.preview = this.finalText.slice(-2000);
           this.stopReason = message.stopReason;

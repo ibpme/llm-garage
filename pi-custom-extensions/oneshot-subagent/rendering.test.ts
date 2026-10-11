@@ -50,14 +50,14 @@ const pi = { name: "review", task: "task", cwd: "/tmp", agent: "pi", status: "su
 
 test("Pi shows the latest call breakdown and never the cumulative total when it exists", () => {
   const details = { ...pi, latestCallUsage: { input: 2, output: 3, cacheRead: 1, cacheWrite: 3 }, totalTokens: 999, costUsd: 0.01 };
-  assert.equal(stats(details), "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · $0.0100");
+  assert.equal(stats(details), "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · context 6 / unknown · $0.0100");
 });
 
 test("Pi latest breakdown keeps zero counts and thousands separators", () => {
   assert.equal(stats({ ...pi, latestCallUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }),
-    "1.0s · 2 turns · 3 tool calls · last call: ↓ 0 input · ↑ 0 output · cached 0");
+    "1.0s · 2 turns · 3 tool calls · last call: ↓ 0 input · ↑ 0 output · cached 0 · context 0 / unknown");
   assert.equal(stats({ ...pi, latestCallUsage: { input: 1234, output: 56, cacheRead: 7000, cacheWrite: 890 } }),
-    "1.0s · 2 turns · 3 tool calls · last call: ↓ 1,234 input · ↑ 56 output · cached 7,890");
+    "1.0s · 2 turns · 3 tool calls · last call: ↓ 1,234 input · ↑ 56 output · cached 7,890 · context 9.1k / unknown");
 });
 
 test("Pi runs without a latest call do not fall back to cumulative totals", () => {
@@ -69,9 +69,9 @@ test("Pi runs without a latest call do not fall back to cumulative totals", () =
 
 test("Claude shows the latest call breakdown and never its cumulative total", () => {
   const claude = { ...pi, agent: "claude", latestCallUsage: { input: 2, output: 3, cacheRead: 1, cacheWrite: 3 }, totalTokens: 999 } as RunDetails;
-  assert.equal(stats(claude), "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4");
+  assert.equal(stats(claude), "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · context 6 / unknown");
   assert.equal(stats({ ...claude, usagePartial: true, costUsd: 0.01 }),
-    "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · $0.0100");
+    "1.0s · 2 turns · 3 tool calls · last call: ↓ 2 input · ↑ 3 output · cached 4 · context 6 / unknown · $0.0100");
 });
 
 test("Claude runs without a completed call show no tokens, not terminal or streamed totals", () => {
@@ -95,4 +95,46 @@ for (const status of ["running", "error"] as const) for (const expanded of [fals
     component.invalidate();
   }
   assert.match(component.render(120).join("\n"), /last call: ↓ 1,234,567 input · ↑ 89 output · cached 9/);
+});
+
+test("verified capacity adds a compact context segment after the last-call breakdown", () => {
+  assert.equal(stats({ ...pi, latestCallUsage: { input: 1234, output: 56, cacheRead: 7000, cacheWrite: 890 }, contextWindow: 200_000, costUsd: 0.01 }),
+    "1.0s · 2 turns · 3 tool calls · last call: ↓ 1,234 input · ↑ 56 output · cached 7,890 · context 9.1k / 200k · 4% · $0.0100");
+});
+
+const tagged = { fg: (color: string, text: string) => `[${color}:${text}]`, bold: (text: string) => text } as unknown as Theme;
+const headerOf = (details: RunDetails) => renderRun(details, false, tagged).render(200).join("\n");
+
+test("context segment keeps its own tone while the rest of the stats stay dim", () => {
+  const base = { ...pi, latestCallUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.01 };
+  const at = (input: number, contextWindow?: number) => headerOf({ ...base, latestCallUsage: { input, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow } as RunDetails);
+  assert.match(at(139_999, 200_000), /\[dim:context 140k \/ 200k · 69%\]/);
+  assert.match(at(140_000, 200_000), /\[warning:context 140k \/ 200k · 70%\]/);
+  assert.match(at(179_999, 200_000), /\[warning:context 180k \/ 200k · 89%\]/);
+  assert.match(at(180_000, 200_000), /\[error:context 180k \/ 200k · 90%\]/);
+  assert.match(at(999_999), /\[dim:context 1M \/ unknown\]/);
+  assert.doesNotMatch(at(999_999), /\[(warning|error):context/);
+  const omitted = headerOf({ ...base, latestCallUsage: undefined, contextWindow: 200_000 } as RunDetails);
+  assert.match(omitted, /\[dim:1\.0s\]/);
+  assert.doesNotMatch(omitted, /context/);
+});
+
+test("warning and error tones ignore the cumulative total and the cost segment", () => {
+  const details = { ...pi, latestCallUsage: { input: 1, output: 999_999, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1_000_000, totalTokens: 1_000_000, costUsd: 0.5 } as RunDetails;
+  const header = headerOf(details);
+  assert.match(header, /\[dim:context 1 \/ 1M · 0%\]/);
+  assert.match(header, /\[dim:\$0\.5000\]/);
+  assert.doesNotMatch(header, /\[(warning|error):/);
+});
+
+for (const expanded of [false, true]) test(`context segment with verified capacity fits every width (${expanded ? "expanded" : "compact"})`, () => {
+  const details = { ...pi, status: "success", name: "review 中文", task: "Review 中文 😀", model: "provider/model", jobDir: "/tmp/job",
+    activity: ["→ read 中文.ts"], preview: "Streaming 中文 😀", result: "## Final\n\n- " + "long text ".repeat(30),
+    latestCallUsage: { input: 1234567, output: 89, cacheRead: 4, cacheWrite: 5 }, contextWindow: 1_000_000, costUsd: 0.01 } as RunDetails;
+  const component = renderRun(details, expanded, theme);
+  for (const width of [1, 2, 3, 4, 10, 40, 80, 120]) {
+    assert.ok(component.render(width).every((line) => visibleWidth(line) <= width), `overflow at ${width}`);
+    component.invalidate();
+  }
+  assert.match(component.render(200).join("\n"), /context 1.2M \/ 1M · 123%/);
 });

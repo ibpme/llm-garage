@@ -144,6 +144,26 @@ For Pi and Claude, tokens are the latest completed model call (`last call: ↓ i
 · cached`, where cached is cache reads plus cache writes); cost is cumulative for
 the whole run. Before a call completes, no token figure is shown. Cumulative totals
 are reported to Pi as tool usage, not displayed.
+
+The context segment (`context 34.2k / 200k · 17%`) is a **last-call snapshot**: the
+latest completed call's input plus cache reads and cache writes. Output and
+cumulative run totals are excluded. Its capacity is the verified context window of
+that call's actual model, never the parent's:
+
+- Pi: the child's last completed assistant message names its provider and model.
+  That pair is looked up in the parent's model registry. An entry whose
+  `models.json` declaration omits `contextWindow` is unknown, because Pi fills
+  those with 128k. Other registry values are trusted as Pi reports them, including
+  models registered by extensions. Models Pi cannot resolve are unknown.
+- Claude: the terminal `result` supplies `modelUsage[model].contextWindow` for the
+  last call's model only. Helper models are ignored and windows are never summed.
+  Capacity stays unknown while the run is live, and after an interrupted run.
+- Unverified capacity displays `context 34.2k / unknown` with no percentage and no
+  warning. The segment is omitted until a call completes.
+
+The tone is the theme's `dim` below 70%, `warning` from 70% up to 90%, and `error`
+at 90% and above. Percentages are floored, so the displayed figure agrees with the tone.
+The rest of the stats line keeps its existing dim styling.
 Expand the result using Pi's normal tool expansion to see activity, working
 directory/model, Markdown output, and the job directory. Thinking content is not
 displayed or returned.

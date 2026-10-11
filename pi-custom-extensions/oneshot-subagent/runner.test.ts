@@ -37,7 +37,7 @@ else {
     { type: 'session', id: 'test' },
     { type: 'tool_execution_start', toolName: 'read', args: { path: 'file.ts' } },
     { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Final 😀' } },
-    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: output }], usage, stopReason: mode === 'error' ? 'error' : 'stop', errorMessage: mode === 'error' ? 'provider failed' : undefined } },
+    { type: 'message_end', message: { role: 'assistant', provider: 'fake-provider', model: 'fake-model', content: [{ type: 'text', text: output }], usage, stopReason: mode === 'error' ? 'error' : 'stop', errorMessage: mode === 'error' ? 'provider failed' : undefined } },
     { type: 'agent_settled', aborted: false },
   ];
   const buffer = Buffer.from(events.map(e => JSON.stringify(e)).join('\\n') + '\\n');
@@ -90,6 +90,14 @@ else {
       assert.deepEqual(await readdir(dirname(outcome.details.jobDir!)), [outcome.details.jobDir!.split("/").at(-1)], "one job directory and no run markers or children");
       assert.equal((await stat(outcome.details.jobDir!)).mode & 0o777, 0o700);
       assert.equal(await readFile(join(outcome.details.jobDir!, "final-response.md"), "utf8"), "Final 😀 answer");
+    });
+    await t.test("Pi capacity comes from the resolver for the completed child call's provider and model", async () => {
+      process.env.ONESHOT_TEST_CASE = "success";
+      const seen: string[] = [];
+      const outcome = await runSubagent(options({ contextWindowFor: (provider, id) => { seen.push(`${provider}/${id}`); return 200_000; } }));
+      assert.equal(outcome.details.contextWindow, 200_000);
+      assert.deepEqual(seen, ["fake-provider/fake-model"]);
+      assert.equal(outcome.usage.input, 7);
     });
     for (const mode of ["error", "exit"]) await t.test(`${mode} is an error result`, async () => {
       process.env.ONESHOT_TEST_CASE = mode;

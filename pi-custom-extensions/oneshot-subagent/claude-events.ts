@@ -17,7 +17,9 @@ export class ClaudeEventState {
   finalText = "";
   private result?: JsonObject;
   private currentMessageId?: string;
+  private currentMessageModel?: string;
   private latestCallId?: string;
+  private latestCallModel?: string;
   private readonly completedCalls = new Set<string>();
   private readonly messageUsage = new Map<string, JsonObject>();
   private readonly toolIds = new Set<string>();
@@ -52,8 +54,9 @@ export class ClaudeEventState {
 
   // Display only: a completion replaces the latest call, even with no usage, so
   // older usage is never shown as the newest call. Repeated completions of the
-  // newest call are idempotent; older duplicates are ignored.
-  private completeCall(id: string | undefined, usage: JsonObject | undefined): void {
+  // newest call are idempotent; older duplicates are ignored. Capacity stays
+  // unknown until the terminal result names the call's model.
+  private completeCall(id: string | undefined, usage: JsonObject | undefined, model: string | undefined): void {
     if (this.result) return;
     if (id) {
       if (this.completedCalls.has(id) && id !== this.latestCallId) return;
@@ -61,6 +64,8 @@ export class ClaudeEventState {
       this.latestCallId = id;
     }
     this.details.latestCallUsage = breakdown(id ? this.messageUsage.get(id) : usage);
+    this.latestCallModel = model;
+    this.details.contextWindow = undefined;
   }
 
   private accept(event: JsonObject): void {
@@ -75,11 +80,12 @@ export class ClaudeEventState {
         this.details.preview = "";
         const message = object(update.message);
         this.currentMessageId = text(message.id) || undefined;
+        this.currentMessageModel = text(message.model) || undefined;
         this.provisionalUsage(this.currentMessageId, message.usage);
       } else if (update.type === "message_delta") {
         this.provisionalUsage(this.currentMessageId, update.usage);
       } else if (update.type === "message_stop") {
-        this.completeCall(this.currentMessageId, undefined);
+        this.completeCall(this.currentMessageId, undefined, this.currentMessageModel);
       }
       const delta = object(update.delta);
       if (update.type === "content_block_delta" && delta.type === "text_delta")
@@ -89,7 +95,7 @@ export class ClaudeEventState {
       if (event.type === "assistant") {
         const id = text(message.id) || undefined;
         this.provisionalUsage(id, message.usage);
-        this.completeCall(id, object(message.usage));
+        this.completeCall(id, object(message.usage), text(message.model) || undefined);
       }
       const content = message.content;
       if (!Array.isArray(content)) return;
@@ -135,6 +141,12 @@ export class ClaudeEventState {
         this.usage.cacheWrite = number(usage.cache_creation_input_tokens);
       }
       this.usage.totalTokens = this.usage.input + this.usage.output + this.usage.cacheRead + this.usage.cacheWrite;
+      // Capacity is verified only for the last completed call's own model; helper models and sums never apply.
+      const perModel = object(event.modelUsage);
+      const lastModel = this.latestCallModel;
+      const window = lastModel !== undefined && this.details.latestCallUsage && Object.hasOwn(perModel, lastModel)
+        ? object(perModel[lastModel]).contextWindow : undefined;
+      this.details.contextWindow = typeof window === "number" && Number.isFinite(window) && window > 0 ? window : undefined;
       this.usage.cost.total = number(event.total_cost_usd);
       const denials = event.permission_denials;
       if (Array.isArray(denials)) for (const denial of denials)

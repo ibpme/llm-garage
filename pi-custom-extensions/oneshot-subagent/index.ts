@@ -8,6 +8,7 @@ import { Type } from "typebox";
 import { oneLine, type RunDetails } from "./events.ts";
 import { renderRun } from "./rendering.ts";
 import { runSubagent } from "./runner.ts";
+import { contextWindowResolver } from "./context-window.ts";
 import { envRole, hasRoleEntry, restoreRole, ROLE_ENTRY, type Role, type SavedEntry } from "./role.ts";
 import { EFFORT_LEVELS, resolveBackend } from "./backend.ts";
 
@@ -71,6 +72,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI) {
         if (role === "child") throw new Error("One-shot subagents cannot delegate");
         if (!params.task.trim()) throw new Error("Task must not be blank");
         const backend = resolveBackend(params, ctx);
+        const contextWindowFor = backend.agent === "pi" ? await contextWindowResolver(ctx.modelRegistry) : undefined;
         const controller = new AbortController();
         const abort = () => controller.abort();
         if (signal?.aborted) abort();
@@ -81,6 +83,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI) {
           task: params.task,
           cwd: resolve(ctx.cwd, params.cwd ?? "."),
           ...backend,
+          contextWindowFor,
           timeoutSeconds: params.timeout_seconds ?? 600,
           signal: controller.signal,
           onProgress: (details) => onUpdate?.({ content: [{ type: "text", text: details.activity.at(-1) ?? `Starting ${backend.agent}…` }], details }),

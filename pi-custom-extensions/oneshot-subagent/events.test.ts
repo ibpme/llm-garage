@@ -120,3 +120,65 @@ test("no latest call exists before a model call completes, even after tool resul
   assert.equal(s.details.latestCallUsage, undefined);
   assert.equal(s.usage.input, 1);
 });
+
+const modelCall = (provider: string | undefined, model: string | undefined, input: number, output = 1) =>
+  ({ ...message("Call"), provider, model, usage: callUsage(input, output, 0, 0) });
+function withCapacity(windows: Record<string, number>, seen: string[] = []) {
+  const details: RunDetails = { name: "test", task: "task", cwd: "/tmp", status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
+  return new EventState(details, (provider, id) => { seen.push(`${provider}/${id}`); return windows[`${provider}/${id}`]; });
+}
+
+test("Pi capacity is resolved from the completed child call's own provider and model", () => {
+  const seen: string[] = [];
+  const s = withCapacity({ "opencode-go/claude-haiku-5-5": 200_000 }, seen);
+  s.feed(event({ type: "message_end", message: modelCall("opencode-go", "claude-haiku-5-5", 34_200) }));
+  assert.equal(s.details.contextWindow, 200_000);
+  assert.deepEqual(seen, ["opencode-go/claude-haiku-5-5"]);
+});
+
+test("Pi capacity follows the latest completed call across model changes and never carries over", () => {
+  const s = withCapacity({ "a/big": 1_000_000, "a/small": 100_000 });
+  s.feed(event({ type: "message_end", message: modelCall("a", "big", 10) }));
+  assert.equal(s.details.contextWindow, 1_000_000);
+  s.feed(event({ type: "message_end", message: modelCall("a", "unknown", 20) }));
+  assert.equal(s.details.contextWindow, undefined);
+  s.feed(event({ type: "message_end", message: modelCall("a", "small", 30) }));
+  assert.equal(s.details.contextWindow, 100_000);
+  assert.deepEqual(s.details.latestCallUsage, { input: 30, output: 1, cacheRead: 0, cacheWrite: 0 });
+});
+
+test("Pi capacity is unknown without provider or model identity and without a resolver", () => {
+  const s = withCapacity({ "undefined/m": 1, "p/undefined": 1 });
+  s.feed(event({ type: "message_end", message: modelCall(undefined, "m", 5) }));
+  assert.equal(s.details.contextWindow, undefined);
+  s.feed(event({ type: "message_end", message: modelCall("p", undefined, 5) }));
+  assert.equal(s.details.contextWindow, undefined);
+  const plain = state();
+  plain.feed(event({ type: "message_end", message: modelCall("p", "m", 5) }));
+  assert.equal(plain.details.contextWindow, undefined);
+});
+
+test("Pi tool results and usage-free completions do not keep a stale capacity", () => {
+  const s = withCapacity({ "a/big": 1_000_000 });
+  s.feed(event({ type: "message_end", message: modelCall("a", "big", 10) }));
+  s.feed(event({ type: "message_end", message: { role: "toolResult", usage: callUsage(50, 60, 0, 7) } }));
+  assert.equal(s.details.contextWindow, 1_000_000);
+  s.feed(event({ type: "message_end", message: { ...modelCall("a", "big", 0), usage: undefined } }));
+  assert.equal(s.details.latestCallUsage, undefined);
+  assert.equal(s.details.contextWindow, undefined);
+});
+
+test("Pi capacity resolution leaves cumulative accounting and cost unchanged", () => {
+  const events = [
+    { type: "message_end", message: { ...modelCall("a", "big", 10, 2), usage: { ...callUsage(10, 2, 0, 0), cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 } } } },
+    { type: "message_end", message: { role: "toolResult", usage: callUsage(5, 5, 5, 5) } },
+    { type: "message_end", message: modelCall("a", "missing", 4, 4) },
+  ];
+  const withResolver = withCapacity({ "a/big": 1_000_000 });
+  const without = state();
+  for (const e of events) { withResolver.feed(event(e)); without.feed(event(e)); }
+  assert.deepEqual(withResolver.usage, without.usage);
+  assert.equal(withResolver.usage.totalTokens, 12 + 20 + 8);
+  assert.equal(withResolver.usage.cost.total, 0.3);
+  assert.equal(withResolver.details.turns, 2);
+});
