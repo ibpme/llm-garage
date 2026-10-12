@@ -80,7 +80,7 @@ See the [launcher README](scripts/README.md) for requirements, all options,
 job lifecycle, permissions, troubleshooting, and tests.
 
 `scripts/agent-spawn.sh` starts interactive Pi in a detached tmux session, or
-a one-shot Pi/Claude JSON event stream in a detached tmux session.
+a single-task Pi/Claude JSON event stream in a detached tmux session.
 Claude is JSON-only and uses the leaf policy in the extension README.
 
 ```bash
@@ -113,22 +113,22 @@ PID in `pid` and session name in `tmux.session`, and redirect shell startup outp
 JSON launches report startup separately from Pi's eventual exit status. Run
 `./scripts/agent-spawn.sh --help` for the full interface.
 
-## One-shot agent delegation
+## Agent task delegation
 
-The [`oneshot-subagent` extension](pi-custom-extensions/oneshot-subagent/README.md)
-adds a `oneshot_subagent` tool for delegating a standalone task to Pi or Claude Code through the
+The [`agent-task` extension](pi-custom-extensions/agent-task/README.md)
+adds an `agent_task` tool for delegating a standalone task to Pi or Claude Code through the
 JSON launcher. Every task runs as a supervised job. By default the main agent
 receives a job receipt, keeps working, is notified when the job finishes, and
-retrieves the answer with `subagent_jobs`; background jobs survive reloads and Pi
+retrieves the answer with `jobs`; background jobs survive reloads and Pi
 exit and can be inspected or cancelled in `/agents`. Foreground mode (per call,
-or the default via `~/.pi/agent/oneshot-subagent.json`) waits and returns the
+or the default via `~/.pi/agent/agent-task.json`) waits and returns the
 final answer with live progress; Shift+↑ or `/agents` sends a running foreground
 call to the background without restarting it. Each call starts fresh and supports cancellation and a
 timeout. Pi inherits the parent model by default; Claude uses its own defaults.
-Only the main (root) session can delegate: one-shot children, Pi or Claude, are
+Only the main (root) session can delegate: agent-task children, Pi or Claude, are
 leaves and never get the tool, a role that persists across reloads, resumes and
 forks. To turn delegation off, disable the extension in Pi. Delegation currently
-remains available in SAFE mode. Claude runs with MCP/native subagents disabled;
+remains available in SAFE mode. Claude runs with MCP and its native `Agent`/`Task` delegation disabled;
 neither backend is a sandbox, so a child with shell access can still launch other
 agents.
 

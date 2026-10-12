@@ -47,7 +47,7 @@ async function readPrefix(path: string, limit: number): Promise<{ text: string; 
 /** Model-facing text for a job; isError for every non-succeeded terminal job. */
 export async function resultText(job: JobSnapshot, now = Date.now()): Promise<{ text: string; isError: boolean }> {
   const { status, request } = job;
-  const footer = `[Subagent job ${job.id}: ${job.dir}]`;
+  const footer = `[Agent task job ${job.id}: ${job.dir}]`;
   if (!isTerminal(status.state)) {
     const quiet = status.lastActivityAt ? ` Last activity ${duration(now - status.lastActivityAt)} ago.` : "";
     return { isError: false, text: `${jobLabel(job)} is ${stateLabel(job, now)}; no result yet.${quiet} ` +
@@ -60,7 +60,7 @@ export async function resultText(job: JobSnapshot, now = Date.now()): Promise<{ 
       (answer.truncated ? `\n\n[Truncated. Full response: ${status.resultPath}]` : "") + `\n\n${footer}` };
   }
   const parts = [
-    `Subagent ${jobLabel(job)} ${status.state}: ${status.terminalReason ?? "no reason recorded"}.`,
+    `Agent task ${jobLabel(job)} ${status.state}: ${status.terminalReason ?? "no reason recorded"}.`,
     `The child may have left partial file changes in ${request.cwd}; inspect them before relying on that tree or retrying. It was not retried automatically.`,
   ];
   if (status.details.preview.trim()) parts.push(`Partial answer (incomplete):\n${status.details.preview}`);
@@ -77,13 +77,13 @@ export function receiptText(job: JobSnapshot, backgrounded: boolean, now = Date.
   const { request, status } = job;
   const observed = isTerminal(status.state) ? `has already finished (${status.state})` : `is ${stateLabel(job, now)}`;
   const intro = backgrounded
-    ? `The user sent foreground subagent ${jobLabel(job)} to the background; it ${observed}.`
-    : `Background subagent ${jobLabel(job)} was accepted and ${observed}.`;
+    ? `The user sent foreground agent task ${jobLabel(job)} to the background; it ${observed}.`
+    : `Background agent task ${jobLabel(job)} was accepted and ${observed}.`;
   const deadline = backgrounded ? `its original ${request.timeoutSeconds}s timeout still applies` : `timeout ${request.timeoutSeconds}s`;
   return `${intro} (${request.agent}${request.model ? ` · ${request.model}` : ""}; ${deadline}.) ` +
     "This is a receipt, not its answer. Continue with independent work; a short notice arrives when it finishes. " +
-    `Retrieve its answer with subagent_jobs {"action":"result","job_id":"${job.id}"} before relying on it, ` +
-    `and do not edit files it may be changing until then.\n\n[Subagent job ${job.id}: ${job.dir}]`;
+    `Retrieve its answer with the jobs tool {"action":"result","job_id":"${job.id}"} before relying on it, ` +
+    `and do not edit files it may be changing until then.\n\n[Agent task job ${job.id}: ${job.dir}]`;
 }
 
 /** Renderer details for a supervised job, matching a direct run's progress and final display. */
@@ -114,16 +114,16 @@ export function addUsage(total: Usage, usage: Usage | undefined): Usage {
 export function outstandingText(jobs: JobSnapshot[], now = Date.now()): string | undefined {
   const outstanding = jobs.filter(isOutstanding);
   if (!outstanding.length) return undefined;
-  return "Background subagent jobs you launched in this session (reminder; not part of the conversation):\n" +
+  return "Background agent task jobs you launched in this session (reminder; not part of the conversation):\n" +
     outstanding.slice(0, 12).map((job) => `- ${summaryLine(job, now)}`).join("\n") +
-    (outstanding.length > 12 ? `\n- …and ${outstanding.length - 12} more (subagent_jobs action "list")` : "") +
-    "\nRetrieve a result with subagent_jobs before relying on it or claiming dependent work is complete. " +
+    (outstanding.length > 12 ? `\n- …and ${outstanding.length - 12} more (jobs tool, action "list")` : "") +
+    "\nRetrieve a result with the jobs tool before relying on it or claiming dependent work is complete. " +
     "Do not edit files a running job may be changing until you have its result.";
 }
 
 export function noticeText(jobs: JobSnapshot[], now = Date.now()): string {
   const lines = jobs.map((job) => `- ${jobLabel(job)}: ${stateLabel(job, now)}` +
     (job.status.state !== "succeeded" && job.status.terminalReason ? ` — ${oneLine(job.status.terminalReason, 200)}` : ""));
-  return `Background subagent job${jobs.length === 1 ? "" : "s"} finished:\n${lines.join("\n")}\n` +
-    `Use subagent_jobs action "result" to retrieve ${jobs.length === 1 ? "it" : "them"}.`;
+  return `Background agent task job${jobs.length === 1 ? "" : "s"} finished:\n${lines.join("\n")}\n` +
+    `Use the jobs tool with action "result" to retrieve ${jobs.length === 1 ? "it" : "them"}.`;
 }

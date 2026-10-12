@@ -6,8 +6,8 @@ import { oneLine } from "./events.ts";
 import { duration, isOutstanding, noticeText } from "./job-results.ts";
 import type { NoticeMode } from "./config.ts";
 
-export const NOTICE_TYPE = "subagent-job-notice";
-export const WIDGET_KEY = "subagent-jobs";
+export const NOTICE_TYPE = "agent-job-notice";
+export const WIDGET_KEY = "agent-jobs";
 
 export interface NoticeDetails { jobs: { id: string; name: string; state: string; reason?: string }[] }
 
@@ -125,7 +125,7 @@ export class JobWatcher {
     const details: NoticeDetails = { jobs: finished.map((job) => ({
       id: job.id, name: job.request.name, state: job.status.state, reason: job.status.terminalReason,
     })) };
-    // The notice names the jobs, not their answers; the model retrieves those with subagent_jobs.
+    // The notice names the jobs, not their answers; the model retrieves those with the jobs tool.
     this.pi.sendMessage({ customType: NOTICE_TYPE, content: noticeText(finished), display: true, details },
       this.mode === "passive" ? { triggerTurn: false } : { triggerTurn: true, deliverAs: this.mode });
   }

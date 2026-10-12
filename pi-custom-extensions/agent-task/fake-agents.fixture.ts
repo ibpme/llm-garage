@@ -9,11 +9,11 @@ const execText = (file: string, args: string[]) => new Promise<string>((resolve,
 /**
  * Installs fake login shells, a fake `tmux` and fake `pi`/`claude` executables
  * in `<root>/bin` for the real agent-spawn launcher. The fake agents read
- * ONESHOT_TEST_CASE (success, large, error, exit, hang, missing-result) and
+ * AGENT_TASK_TEST_CASE (success, large, error, exit, hang, missing-result) and
  * record their arguments in `<root>/args.json`. No model calls are made.
  *
  * tmux sessions inherit the server's environment, not the launching client's,
- * so `tmux` targets a private server and passes PATH and ONESHOT_TEST_CASE to
+ * so `tmux` targets a private server and passes PATH and AGENT_TASK_TEST_CASE to
  * every new session; the fake shell also puts this bin first. A launch can
  * therefore never reach real agents or another tmux server's state. Call
  * stopFakeAgents(root) to kill the private server.
@@ -22,14 +22,14 @@ export async function installFakeAgents(root: string): Promise<string> {
   const bin = join(root, "bin");
   await mkdir(bin);
   // Short fixed directory: Unix socket paths are limited to ~100 bytes on macOS.
-  const socket = `/tmp/oneshot-tmux-${randomBytes(6).toString("hex")}.sock`;
+  const socket = `/tmp/agent-task-tmux-${randomBytes(6).toString("hex")}.sock`;
   await writeFile(join(root, "tmux.socket"), socket);
   const realTmux = await execText("/bin/bash", ["-c", "command -v tmux"]);
   await writeFile(join(bin, "tmux"), `#!/bin/bash
 tmux=(${JSON.stringify(realTmux)} -S ${JSON.stringify(socket)} -f /dev/null)
 if [[ \${1:-} == new-session ]]; then
   shift
-  exec "\${tmux[@]}" new-session -e "PATH=$PATH" -e "ONESHOT_TEST_CASE=\${ONESHOT_TEST_CASE-}" "$@"
+  exec "\${tmux[@]}" new-session -e "PATH=$PATH" -e "AGENT_TASK_TEST_CASE=\${AGENT_TASK_TEST_CASE-}" "$@"
 fi
 exec "\${tmux[@]}" "$@"
 `, { mode: 0o755 });
@@ -40,8 +40,8 @@ exec "\${tmux[@]}" "$@"
   for (const name of ["bash", "zsh"]) await writeFile(join(bin, name), shell, { mode: 0o755 });
   await writeFile(join(bin, "pi"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, cwd: process.cwd() }));
-const mode = process.env.ONESHOT_TEST_CASE;
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_AGENT_TASK_CHILD, cwd: process.cwd() }));
+const mode = process.env.AGENT_TASK_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
   const usage = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 } };
@@ -61,8 +61,8 @@ else {
 `, { mode: 0o755 });
   await writeFile(join(bin, "claude"), `#!${process.execPath}
 const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD }));
-const mode = process.env.ONESHOT_TEST_CASE;
+fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_AGENT_TASK_CHILD }));
+const mode = process.env.AGENT_TASK_TEST_CASE;
 if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 else {
   const events = [

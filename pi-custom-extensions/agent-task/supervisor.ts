@@ -12,7 +12,7 @@ import {
 import type { Effort } from "./backend.ts";
 import { contextWindowLookup } from "./context-usage.ts";
 import type { RunDetails } from "./events.ts";
-import { runSubagent } from "./runner.ts";
+import { runAgentTask } from "./runner.ts";
 
 const snapshot = (details: RunDetails): JobDetails => ({
   activity: details.activity.slice(-80), preview: details.preview.slice(-2000), turns: details.turns,
@@ -63,7 +63,7 @@ async function supervise(root: string, id: string): Promise<void> {
   let lastActivity = "";
   const childDir = join(dir, "child");
   await mkdir(childDir, { recursive: true, mode: 0o700 });
-  const outcome = await runSubagent({
+  const outcome = await runAgentTask({
     launcher: request.launcher, agent: request.agent, name: request.name,
     task: await readFile(join(dir, "task.md"), "utf8"), cwd: request.cwd,
     model: request.model, provider: request.provider, thinking: request.thinking,

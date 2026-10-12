@@ -27,7 +27,7 @@ export interface RunOptions {
   outputRoot?: string;
   /** Pi only: verified capacity lookup for the completed child call's model. */
   contextWindowFor?: ContextWindowResolver;
-  /** Use this existing private directory instead of creating `oneshot-*` under outputRoot. */
+  /** Use this existing private directory instead of creating `task-*` under outputRoot. */
   runDir?: string;
   /** Deadline origin; defaults to the call time. */
   startedAt?: number;
@@ -40,7 +40,7 @@ export type RunOutcome = "success" | "error" | "cancelled" | "timed-out";
 class TimeoutError extends Error {}
 
 // Advisory only: a child with shell access can still launch other agents.
-export const CHILD_NOTICE = "You are a one-shot subagent. You cannot delegate: do not launch other agents or subagents " +
+export const CHILD_NOTICE = "You are running a delegated agent task. You cannot delegate: do not launch other agents " +
   "(including via agent-spawn.sh, pi, or claude); complete the task yourself.\n\n";
 
 function launch(script: string, args: string[]): Promise<void> {
@@ -97,7 +97,7 @@ async function stopRun(runDir: string): Promise<void> {
     const pids = await Promise.all(entries.filter((entry) => entry.isDirectory())
       .map((entry) => optionalRead(join(runDir, entry.name, "pid"))));
     if (pids.some((pid) => pid !== undefined)) break;
-    if (Date.now() >= deadline) throw new Error(`Cannot clean up an in-flight subagent launch: ${runDir}`);
+    if (Date.now() >= deadline) throw new Error(`Cannot clean up an in-flight agent task launch: ${runDir}`);
     await sleep(100);
   }
   for (const entry of await readdir(runDir, { withFileTypes: true })) {
@@ -107,7 +107,7 @@ async function stopRun(runDir: string): Promise<void> {
   }
 }
 
-export async function runSubagent(options: RunOptions): Promise<{ details: RunDetails; text: string; usage: Usage; outcome: RunOutcome; resultPath?: string }> {
+export async function runAgentTask(options: RunOptions): Promise<{ details: RunDetails; text: string; usage: Usage; outcome: RunOutcome; resultPath?: string }> {
   const started = options.startedAt ?? Date.now();
   const details: RunDetails = { name: options.name, task: options.task, cwd: options.cwd,
     agent: options.agent ?? "pi", model: options.model, status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
@@ -133,7 +133,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     else {
       const root = options.outputRoot ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agent-spawn");
       await mkdir(root, { recursive: true });
-      runDir = await mkdtemp(join(root, "oneshot-"));
+      runDir = await mkdtemp(join(root, "task-"));
     }
     const promptFile = join(runDir, "task.md");
     await writeFile(promptFile, CHILD_NOTICE + options.task, { mode: 0o600 });
@@ -200,7 +200,7 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
   } catch (error) {
     details.status = options.signal.aborted ? "aborted" : "error";
     outcome = options.signal.aborted ? "cancelled" : error instanceof TimeoutError ? "timed-out" : "error";
-    result = options.signal.aborted ? "One-shot subagent was cancelled." : `One-shot subagent failed: ${error instanceof Error ? error.message : String(error)}`;
+    result = options.signal.aborted ? "Agent task was cancelled." : `Agent task failed: ${error instanceof Error ? error.message : String(error)}`;
     if (jobDir) {
       const stderr = await readTail(join(jobDir, "stderr.log"));
       if (stderr?.trim()) result += `\n\n${stderr.slice(-4000)}`;
@@ -227,6 +227,6 @@ export async function runSubagent(options: RunOptions): Promise<{ details: RunDe
     }
   }
   details.result = result;
-  const text = result + (jobDir ? `\n\n[Subagent job: ${jobDir}]` : "");
+  const text = result + (jobDir ? `\n\n[Agent task job: ${jobDir}]` : "");
   return { details, text, usage: state.usage, outcome, resultPath };
 }

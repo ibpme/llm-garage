@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { CHILD_NOTICE, runSubagent, type RunOptions } from "./runner.ts";
+import { CHILD_NOTICE, runAgentTask, type RunOptions } from "./runner.ts";
 import { installFakeAgents, stopFakeAgents } from "./fake-agents.fixture.ts";
 
 const launcher = resolve(dirname(fileURLToPath(import.meta.url)), "../../scripts/agent-spawn.sh");
@@ -20,9 +20,9 @@ async function assertGroupStopped(pid: number): Promise<void> {
 }
 
 test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, cancellation and timeout", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "oneshot-test-"));
+  const root = await mkdtemp(join(tmpdir(), "agent-task-test-"));
   const bin = await installFakeAgents(root);
-  const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
+  const previous = { PATH: process.env.PATH, AGENT_TASK_TEST_CASE: process.env.AGENT_TASK_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const updates: string[] = [];
   const options = (overrides: Partial<RunOptions> = {}): RunOptions => ({
@@ -33,8 +33,8 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
   });
   try {
     await t.test("success forwards literal task/model args and returns only final answer", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
-      const outcome = await runSubagent(options());
+      process.env.AGENT_TASK_TEST_CASE = "success";
+      const outcome = await runAgentTask(options());
       assert.equal(outcome.details.status, "success");
       assert.match(outcome.text, /Final 😀 answer/);
       assert.equal(outcome.usage.input, 7);
@@ -49,33 +49,33 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
       assert.equal(await readFile(join(outcome.details.jobDir!, "final-response.md"), "utf8"), "Final 😀 answer");
     });
     await t.test("Pi capacity comes from the resolver for the completed child call's provider and model", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const seen: string[] = [];
-      const outcome = await runSubagent(options({ contextWindowFor: (provider, id) => { seen.push(`${provider}/${id}`); return 200_000; } }));
+      const outcome = await runAgentTask(options({ contextWindowFor: (provider, id) => { seen.push(`${provider}/${id}`); return 200_000; } }));
       assert.equal(outcome.details.contextWindow, 200_000);
       assert.deepEqual(seen, ["fake-provider/fake-model"]);
       assert.equal(outcome.usage.input, 7);
     });
     for (const mode of ["error", "exit"]) await t.test(`${mode} is an error result`, async () => {
-      process.env.ONESHOT_TEST_CASE = mode;
-      const outcome = await runSubagent(options());
+      process.env.AGENT_TASK_TEST_CASE = mode;
+      const outcome = await runAgentTask(options());
       assert.equal(outcome.details.status, "error");
       assert.match(outcome.text, mode === "error" ? /provider failed/ : /status 7/);
     });
     await t.test("large responses are saved whole and bounded in model context", async () => {
-      process.env.ONESHOT_TEST_CASE = "large";
-      const outcome = await runSubagent(options());
+      process.env.AGENT_TASK_TEST_CASE = "large";
+      const outcome = await runAgentTask(options());
       assert.equal(outcome.details.status, "success");
       assert.ok(outcome.text.length < 42000);
       assert.match(outcome.text, /Truncated.*Full response:/);
       assert.equal((await readFile(join(outcome.details.jobDir!, "final-response.md"), "utf8")).length, 50000);
     });
     await t.test("cancel during launch still finds and stops the detached process group", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20);
       try {
-        const outcome = await runSubagent(options({ signal: controller.signal }));
+        const outcome = await runAgentTask(options({ signal: controller.signal }));
         assert.equal(outcome.details.status, "aborted");
         assert.ok(outcome.details.jobDir);
         assert.match(outcome.text, /cancelled/);
@@ -84,24 +84,24 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
       } finally { clearTimeout(timer); }
     });
     await t.test("timeout stops a stuck child", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
-      const outcome = await runSubagent(options({ timeoutSeconds: 1 }));
+      process.env.AGENT_TASK_TEST_CASE = "hang";
+      const outcome = await runAgentTask(options({ timeoutSeconds: 1 }));
       assert.equal(outcome.details.status, "error");
       assert.match(outcome.text, /Timed out/);
       const pid = Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8"));
       await assertGroupStopped(pid);
     });
     await t.test("Pi details expose the latest completed call while keeping cumulative accounting", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
-      const outcome = await runSubagent(options());
+      process.env.AGENT_TASK_TEST_CASE = "success";
+      const outcome = await runAgentTask(options());
       assert.deepEqual(outcome.details.latestCallUsage, { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 });
       assert.equal(outcome.details.totalTokens, 10);
       assert.equal(outcome.usage.totalTokens, 10);
     });
     await t.test("Claude backend normalizes model/effort and ignores provider", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const previews: string[] = [];
-      const outcome = await runSubagent(options({ agent: "claude", model: "sonnet:low", effort: "high", thinking: undefined,
+      const outcome = await runAgentTask(options({ agent: "claude", model: "sonnet:low", effort: "high", thinking: undefined,
         onProgress: (details) => previews.push(details.preview) }));
       assert.equal(outcome.details.status, "success");
       assert.match(outcome.text, /Claude final 😀 answer/);
@@ -121,33 +121,33 @@ test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, can
       assert.equal(captured.args.at(-1), CHILD_NOTICE + options().task);
     });
     for (const mode of ["error", "exit", "missing-result"]) await t.test(`Claude ${mode} returns an error`, async () => {
-      process.env.ONESHOT_TEST_CASE = mode;
-      const outcome = await runSubagent(options({ agent: "claude" }));
+      process.env.AGENT_TASK_TEST_CASE = mode;
+      const outcome = await runAgentTask(options({ agent: "claude" }));
       assert.equal(outcome.details.status, "error");
       assert.match(outcome.text, mode === "error" ? /Claude provider failed/ : mode === "exit" ? /status 7/ : /without a result/);
     });
     await t.test("Claude timeout and cancellation stop detached process groups", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 100);
       try {
-        const outcome = await runSubagent(options({ agent: "claude", signal: controller.signal }));
+        const outcome = await runAgentTask(options({ agent: "claude", signal: controller.signal }));
         assert.equal(outcome.details.status, "aborted");
         await assertGroupStopped(Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8")));
       } finally { clearTimeout(timer); }
-      const outcome = await runSubagent(options({ agent: "claude", timeoutSeconds: 1 }));
+      const outcome = await runAgentTask(options({ agent: "claude", timeoutSeconds: 1 }));
       assert.equal(outcome.details.status, "error");
       assert.match(outcome.text, /Timed out/);
       await assertGroupStopped(Number(await readFile(join(outcome.details.jobDir!, "pid"), "utf8")));
     });
     await t.test("pre-aborted requests never launch", async () => {
       const controller = new AbortController(); controller.abort();
-      const outcome = await runSubagent(options({ signal: controller.signal }));
+      const outcome = await runAgentTask(options({ signal: controller.signal }));
       assert.equal(outcome.details.status, "aborted");
       assert.equal(outcome.details.jobDir, undefined);
     });
     await t.test("missing launcher returns a useful failure", async () => {
-      const outcome = await runSubagent(options({ launcher: join(root, "missing.sh") }));
+      const outcome = await runAgentTask(options({ launcher: join(root, "missing.sh") }));
       assert.equal(outcome.details.status, "error");
       assert.match(outcome.text, /Launcher failed/);
     });

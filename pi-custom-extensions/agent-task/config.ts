@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { WaitPolicy } from "../shared/agent-jobs/store.ts";
 
-export const CONFIG_FILE = "oneshot-subagent.json";
+export const CONFIG_FILE = "agent-task.json";
 export const NOTICE_MODES = ["followUp", "steer", "passive"] as const;
 /**
  * How background completion notices reach the model. followUp: after the current run, or a new
@@ -10,7 +10,7 @@ export const NOTICE_MODES = ["followUp", "steer", "passive"] as const;
  */
 export type NoticeMode = typeof NOTICE_MODES[number];
 
-export interface OneshotConfig {
+export interface AgentTaskConfig {
   /** Waiting policy when a tool call omits `mode`. */
   defaultMode: WaitPolicy;
   /** Whether the send-to-background shortcut is bound; explicit background launches and /agents are unaffected. */
@@ -18,10 +18,10 @@ export interface OneshotConfig {
   completionNotice: NoticeMode;
 }
 
-export const DEFAULT_CONFIG: OneshotConfig = { defaultMode: "background", allowBackgroundShortcut: true, completionNotice: "followUp" };
+export const DEFAULT_CONFIG: AgentTaskConfig = { defaultMode: "background", allowBackgroundShortcut: true, completionNotice: "followUp" };
 
 /** Missing files and fields use the defaults; invalid values fall back per field with a warning. */
-export function loadConfig(path: string): { config: OneshotConfig; warnings: string[] } {
+export function loadConfig(path: string): { config: AgentTaskConfig; warnings: string[] } {
   const config = { ...DEFAULT_CONFIG };
   const warnings: string[] = [];
   let raw: string;

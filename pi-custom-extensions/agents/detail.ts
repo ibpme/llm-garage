@@ -4,7 +4,7 @@ import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { Markdown, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { isTerminal, readBounded } from "../shared/agent-jobs/store.ts";
 import type { JobSnapshot } from "../shared/agent-jobs/jobs.ts";
-import { contextSegment } from "../oneshot-subagent/context-usage.ts";
+import { contextSegment } from "../agent-task/context-usage.ts";
 import { agentDescription, agentState, clean, cleanText, jobElapsed, jobModel, providerName, stateText, stateTone } from "./rows.ts";
 import { isSelectable, type Agent } from "./tmux.ts";
 

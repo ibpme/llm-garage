@@ -21,10 +21,10 @@ import { AttachedWaits, type AttachedWait } from "./foreground.ts";
 import { addUsage, jobLabel, outstandingText, receiptText, resultText, runDetails, summaryLine } from "./job-results.ts";
 import { JobWatcher, NOTICE_TYPE, type NoticeDetails } from "./job-watcher.ts";
 
-const TOOL_NAME = "oneshot_subagent";
-const JOBS_TOOL_NAME = "subagent_jobs";
-const CONTEXT_TYPE = "subagent-jobs-outstanding";
-export const BACKGROUND_SHORTCUT_ACTION = "extensions.oneshotSubagent.background";
+const TOOL_NAME = "agent_task";
+const JOBS_TOOL_NAME = "jobs";
+const CONTEXT_TYPE = "agent-jobs-outstanding";
+export const BACKGROUND_SHORTCUT_ACTION = "extensions.agentTask.background";
 export const DEFAULT_BACKGROUND_KEYS = ["shift+up"] as const;
 const here = dirname(realpathSync(fileURLToPath(import.meta.url)));
 const launcher = resolve(here, "../../scripts/agent-spawn.sh");
@@ -45,8 +45,8 @@ export interface ReceiptDetails {
   backgrounded?: boolean;
 }
 
-export interface OneshotOptions {
-  /** Defaults to oneshot-subagent.json in Pi's agent directory. */
+export interface AgentTaskOptions {
+  /** Defaults to agent-task.json in Pi's agent directory. */
   configPath?: string;
   /** Defaults to keybindings.json in Pi's agent directory. */
   keybindingsPath?: string;
@@ -56,7 +56,7 @@ interface JobsToolDetails { action: string; jobs: { id: string; name: string; st
 
 const text = (value: string) => [{ type: "text" as const, text: value }];
 
-export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new AgentJobs({ supervisor }), options: OneshotOptions = {}) {
+export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJobs({ supervisor }), options: AgentTaskOptions = {}) {
   const { config, warnings } = loadConfig(options.configPath ?? join(getAgentDir(), CONFIG_FILE));
   const baseRole = envRole();
   let role: Role = baseRole;
@@ -99,7 +99,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       registered = true;
       registerTools();
     }
-    if (!warned && warnings.length && ctx.hasUI) ctx.ui.notify(`One-shot subagent config: ${warnings.join("; ")}`, "warning");
+    if (!warned && warnings.length && ctx.hasUI) ctx.ui.notify(`Agent task config: ${warnings.join("; ")}`, "warning");
     warned = true;
     unpublish ??= publishForegroundWaits(waits);
     watcher = new JobWatcher(pi, jobs, ctx, config.completionNotice);
@@ -130,14 +130,14 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       return `${theme.fg(tone, item.state === "succeeded" ? "✓" : "✗")} ${oneLine(item.name, 64)} ${theme.fg("dim", item.id)} ` +
         theme.fg(tone, item.state) + (item.reason && item.state !== "succeeded" ? theme.fg("dim", ` · ${oneLine(item.reason, 160)}`) : "");
     };
-    return new Text(theme.fg("accent", "◆ background subagents finished") + theme.fg("dim", "  /agents to inspect") +
+    return new Text(theme.fg("accent", "◆ background agent tasks finished") + theme.fg("dim", "  /agents to inspect") +
       items.map((item) => `\n  ${line(item)}`).join(""), 0, 0);
   });
 
   pi.registerCommand("jobs-indicator", {
-    description: "Toggle the background subagent indicator between compact and expanded",
+    description: "Toggle the background job indicator between compact and expanded",
     handler: async (args, ctx) => {
-      if (!watcher) { ctx.ui.notify("Background subagents are unavailable in this session.", "warning"); return; }
+      if (!watcher) { ctx.ui.notify("Background jobs are unavailable in this session.", "warning"); return; }
       const choice = args.trim();
       if (choice && choice !== "compact" && choice !== "expanded") { ctx.ui.notify("Usage: /jobs-indicator [compact|expanded]", "warning"); return; }
       watcher.expanded = choice ? choice === "expanded" : !watcher.expanded;
@@ -147,18 +147,18 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
 
   const backgroundKeys = config.allowBackgroundShortcut
     ? loadShortcutKeys(options.keybindingsPath ?? join(getAgentDir(), "keybindings.json"), BACKGROUND_SHORTCUT_ACTION, DEFAULT_BACKGROUND_KEYS) : [];
-  for (const key of backgroundKeys) pi.registerShortcut(key, { description: "Send a foreground one-shot subagent to the background", handler: sendToBackground });
+  for (const key of backgroundKeys) pi.registerShortcut(key, { description: "Send a foreground agent task to the background", handler: sendToBackground });
   const backgroundHint = backgroundKeys.length ? backgroundKeys.map(keyLabel).join("/") : undefined;
 
   async function sendToBackground(ctx: ExtensionContext): Promise<void> {
     if (role === "child" || !registered) return;
     const owner = ctx.sessionManager.getSessionId();
     const eligible = waits.attached(owner);
-    if (!eligible.length) { ctx.ui.notify("No foreground subagent is running.", "info"); return; }
+    if (!eligible.length) { ctx.ui.notify("No foreground agent task is running.", "info"); return; }
     let target = eligible[0];
     if (eligible.length > 1) {
       const labels = eligible.map((job) => `${oneLine(job.name, 64)} (${job.jobId})`);
-      const choice = await ctx.ui.select("Send which subagent to the background?", labels);
+      const choice = await ctx.ui.select("Send which agent task to the background?", labels);
       if (choice === undefined) return;
       target = eligible[labels.indexOf(choice)];
     }
@@ -171,7 +171,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
   const owned = async (id: string, ctx: ExtensionContext): Promise<JobSnapshot> => {
     const job = await jobs.inspect(id);
     // Other sessions' jobs are indistinguishable from missing ones.
-    if (!job || job.request.owner.sessionId !== ctx.sessionManager.getSessionId()) throw new Error(`No subagent job ${id} in this session`);
+    if (!job || job.request.owner.sessionId !== ctx.sessionManager.getSessionId()) throw new Error(`No agent task job ${id} in this session`);
     return job;
   };
 
@@ -221,7 +221,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       if ((signal.aborted || overdue) && wait.settle("cancelled")) {
         const { job: stopped = current } = await jobs.cancel(current.id, wait.owner);
         if (!isTerminal(stopped.status.state)) {
-          return { content: text(`Cancellation of ${jobLabel(stopped)} was requested; it is still stopping.\n\n[Subagent job ${stopped.id}: ${stopped.dir}]`),
+          return { content: text(`Cancellation of ${jobLabel(stopped)} was requested; it is still stopping.\n\n[Agent task job ${stopped.id}: ${stopped.dir}]`),
             details: { ...runDetails(stopped, task), status: "aborted" }, isError: true };
         }
         // Cancellation can lose to completion; a finished answer is still an answer.
@@ -230,7 +230,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
           isError: stopped.status.state !== "succeeded" };
       }
       const next = await jobs.inspect(current.id);
-      if (!next) throw new Error(`Subagent job record disappeared: ${current.dir}`);
+      if (!next) throw new Error(`Agent task job record disappeared: ${current.dir}`);
       current = next;
       if (released()) return receipt(current, task, true);
       if (isTerminal(current.status.state) && wait.settle("completed")) {
@@ -257,7 +257,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       try { job = await jobs.start(request, controller.signal); }
       catch (error) {
         if (!controller.signal.aborted) throw error;
-        return { content: text("One-shot subagent was cancelled."), details: { ...initial, status: "aborted" as const, result: "One-shot subagent was cancelled." }, isError: true };
+        return { content: text("Agent task was cancelled."), details: { ...initial, status: "aborted" as const, result: "Agent task was cancelled." }, isError: true };
       }
       wait = waits.attach({ jobId: job.id, name: request.name, owner: request.owner.sessionId });
       wait.onBackground = async () => {
@@ -283,25 +283,25 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
     pi.registerTool({
       name: TOOL_NAME,
       exposure: "direct",
-      label: "One-shot subagent",
+      label: "Agent task",
       renderShell: "self",
       description: "Delegate a complete, self-contained task to a fresh Pi or Claude Code agent via agent-spawn.sh in JSON mode. " +
         `Default mode here: "${config.defaultMode}". Mode "foreground" waits and returns the final answer; the user may send it to the background, ` +
         `in which case the call returns a job receipt instead. Mode "background" returns a job receipt immediately while the child runs independently. ` +
-        `Collect a receipt's answer later with ${JOBS_TOOL_NAME}. ` +
+        `Collect a receipt's answer later with the ${JOBS_TOOL_NAME} tool. ` +
         "The child has its own tools/configuration and can edit files or run commands. " +
         "It does not see this conversation and does not resume earlier delegations. Children are leaves and cannot delegate further. " +
         "Defaults to the current working directory. Pi inherits model/thinking; Claude uses its own defaults. Delegation remains available in SAFE mode.",
-      promptSnippet: `oneshot_subagent: delegate a standalone task to a fresh Pi or Claude Code agent; ${foregroundDefault
-        ? "waits for the answer by default" : "runs in the background by default"} (receipts are collected with ${JOBS_TOOL_NAME})`,
+      promptSnippet: `agent_task: delegate a standalone task to a fresh Pi or Claude Code agent; ${foregroundDefault
+        ? "waits for the answer by default" : "runs in the background by default"} (receipts are collected with the ${JOBS_TOOL_NAME} tool)`,
       promptGuidelines: [
-        "Give oneshot_subagent all necessary context, file paths, constraints, and expected deliverables; it cannot see the parent conversation.",
-        `A receipt is not an answer. After one, keep working on independent tasks and retrieve the result with ${JOBS_TOOL_NAME} before relying on it or claiming dependent work is complete.`,
+        "Give agent_task all necessary context, file paths, constraints, and expected deliverables; it cannot see the parent conversation.",
+        `A receipt is not an answer. After one, keep working on independent tasks and retrieve the result with the ${JOBS_TOOL_NAME} tool before relying on it or claiming dependent work is complete.`,
         waking
-          ? `A completion notice arrives as a new message when a background job finishes; if you have nothing else to do, end your turn instead of polling ${JOBS_TOOL_NAME}.`
+          ? `A completion notice arrives as a new message when a background job finishes; if you have nothing else to do, end your turn instead of polling the ${JOBS_TOOL_NAME} tool.`
           : `Completion notices do not start a turn; use mode "foreground" when you are blocked on the answer.`,
         foregroundDefault
-          ? 'Pass mode "background" when you have independent work to do while the subagent runs.'
+          ? 'Pass mode "background" when you have independent work to do while the agent task runs.'
           : 'Pass mode "foreground" only when you are blocked on the answer.',
         "Avoid concurrent agents editing the same files, and do not edit files a running background job may change. The child is not a sandbox and has its own tool permissions, but it cannot delegate further.",
       ],
@@ -320,21 +320,21 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
         timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3600, description: "Total time limit in seconds, fixed at launch (default 600 in foreground, 1800 in background)" })),
       }),
       async execute(toolCallId, params, signal, onUpdate, ctx): Promise<AgentToolResult<RunDetails | ReceiptDetails>> {
-        if (role === "child") throw new Error("One-shot subagents cannot delegate");
+        if (role === "child") throw new Error("Agent tasks cannot delegate");
         if (!params.task.trim()) throw new Error("Task must not be blank");
         const backend = resolveBackend(params, ctx);
         const mode = params.mode ?? config.defaultMode;
-        const name = params.name ?? "subagent";
+        const name = params.name ?? "agent";
         const initial: RunDetails = { name, task: params.task, cwd: resolve(ctx.cwd, params.cwd ?? "."), agent: backend.agent, model: backend.model,
           status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
         if (mode === "foreground" && signal?.aborted)
-          return { content: text("One-shot subagent was cancelled."), details: { ...initial, status: "aborted", result: "One-shot subagent was cancelled." }, isError: true };
+          return { content: text("Agent task was cancelled."), details: { ...initial, status: "aborted", result: "Agent task was cancelled." }, isError: true };
         const owner = ctx.sessionManager.getSessionId();
         if (mode === "background") {
           const active = await jobs.list({ owner, active: true });
           if (active.length >= MAX_ACTIVE_PER_OWNER) {
-            throw new Error(`At most ${MAX_ACTIVE_PER_OWNER} background subagent jobs may run at once in this session; active: ` +
-              `${active.map((job) => jobLabel(job)).join(", ")}. Wait for, retrieve or cancel one with ${JOBS_TOOL_NAME}, or use mode "foreground".`);
+            throw new Error(`At most ${MAX_ACTIVE_PER_OWNER} background agent task jobs may run at once in this session; active: ` +
+              `${active.map((job) => jobLabel(job)).join(", ")}. Wait for, retrieve or cancel one with the ${JOBS_TOOL_NAME} tool, or use mode "foreground".`);
           }
         }
         const cwd = await realpath(initial.cwd);
@@ -351,7 +351,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       renderCall(args, theme) {
         const mode = args.mode ?? config.defaultMode;
         return new Text(
-          theme.fg("toolTitle", theme.bold("◆ one-shot subagent")) + theme.fg("accent", `  ${oneLine(args.name ?? "subagent", 64)}`) + theme.fg("dim", ` · ${args.agent ?? "pi"}`) +
+          theme.fg("toolTitle", theme.bold("◆ agent task")) + theme.fg("accent", `  ${oneLine(args.name ?? "agent", 64)}`) + theme.fg("dim", ` · ${args.agent ?? "pi"}`) +
           (args.model ? theme.fg("dim", ` · ${oneLine(args.model, 80)}`) : "") + theme.fg("dim", ` · ${mode}`) +
           `\n${theme.fg("muted", "  Task ")} ${theme.fg("toolOutput", oneLine(args.task ?? "…", 240))}`, 0, 0);
       },
@@ -374,13 +374,13 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
     pi.registerTool({
       name: JOBS_TOOL_NAME,
       exposure: "direct",
-      label: "Subagent jobs",
-      description: "Manage one-shot subagent jobs launched from this session: list them, check status, retrieve a finished job's answer, " +
+      label: "Jobs",
+      description: "Manage agent task jobs launched from this session: list them, check status, retrieve a finished job's answer, " +
         "or cancel one. Retrieving a running job returns its state, not an error. " +
         "Failed, timed-out, cancelled and interrupted jobs are returned as errors; their child may have left partial changes.",
-      promptSnippet: `${JOBS_TOOL_NAME}: list, check, retrieve, or cancel background subagent jobs from this session`,
+      promptSnippet: `${JOBS_TOOL_NAME}: list, check, retrieve, or cancel background agent task jobs from this session`,
       promptGuidelines: [
-        `Retrieve a background job's answer with ${JOBS_TOOL_NAME} action "result" before relying on it, typically after its completion notice.`,
+        `Retrieve a background job's answer with the ${JOBS_TOOL_NAME} tool, action "result", before relying on it, typically after its completion notice.`,
       ],
       annotations: { openWorldHint: false },
       parameters: Type.Object({
@@ -388,12 +388,12 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
         job_id: Type.Optional(Type.String({ pattern: "^job-[0-9a-f]{12}$", description: "Job ID from the receipt or completion notice" })),
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<JobsToolDetails>> {
-        if (role === "child") throw new Error("One-shot subagents have no background jobs");
+        if (role === "child") throw new Error("Agent tasks have no background jobs");
         const owner = ctx.sessionManager.getSessionId();
         const action = params.action;
         if (action === "list") {
           const all = await jobs.list({ owner, limit: 30 });
-          return { content: text(all.length ? all.map((job) => `- ${summaryLine(job)}`).join("\n") : "No subagent jobs in this session."),
+          return { content: text(all.length ? all.map((job) => `- ${summaryLine(job)}`).join("\n") : "No agent task jobs in this session."),
             details: jobsDetails(action, all) };
         }
         if (!params.job_id) throw new Error(`Action "${action}" requires job_id`);
@@ -414,7 +414,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       },
       renderCall(args, theme) {
         const target = args.job_id ?? "";
-        return new Text(theme.fg("toolTitle", theme.bold("◆ subagent jobs")) + theme.fg("accent", `  ${args.action ?? "…"}`) +
+        return new Text(theme.fg("toolTitle", theme.bold("◆ jobs")) + theme.fg("accent", `  ${args.action ?? "…"}`) +
           (target ? theme.fg("dim", ` · ${oneLine(target, 120)}`) : ""), 0, 0);
       },
     });

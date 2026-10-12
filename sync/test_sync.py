@@ -185,11 +185,11 @@ class SyncScriptTests(SyncFixture):
         prompt = self.home / ".pi/agent/prompts/audit-garage.md"
         self.assertEqual(prompt.resolve(), ROOT / "prompts/audit-garage.md")
 
-    def test_pi_sync_installs_oneshot_defaults_once_and_keeps_local_preferences(self) -> None:
-        local = self.home / ".pi/agent/oneshot-subagent.json"
+    def test_pi_sync_installs_agent_task_defaults_once_and_keeps_local_preferences(self) -> None:
+        local = self.home / ".pi/agent/agent-task.json"
         self.run_script("sync-pi.sh")
         self.assertFalse(local.is_symlink())
-        self.assertEqual(local.read_bytes(), (ROOT / "pi-custom-config/oneshot-subagent.json").read_bytes())
+        self.assertEqual(local.read_bytes(), (ROOT / "pi-custom-config/agent-task.json").read_bytes())
         preference = '{"defaultMode": "background", "allowBackgroundShortcut": false}\n'
         local.write_text(preference)
         self.run_script("sync-pi.sh")

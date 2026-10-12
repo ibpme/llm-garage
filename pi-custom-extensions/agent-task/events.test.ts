@@ -66,13 +66,13 @@ test("malformed records fail rather than silently dropping protocol data", () =>
   assert.throws(() => state().feed('{"type":', true));
 });
 
-test("oneshot_subagent tool events are ordinary activity and never create nested runs", () => {
+test("agent_task tool events are ordinary activity and never create nested runs", () => {
   const s = state();
-  s.feed(event({ type: "tool_execution_start", toolName: "oneshot_subagent", toolCallId: "nested-1", args: { name: "grandchild", task: "Inspect files" } }));
-  s.feed(event({ type: "tool_execution_end", toolName: "oneshot_subagent", toolCallId: "nested-1", result: {}, isError: true }));
+  s.feed(event({ type: "tool_execution_start", toolName: "agent_task", toolCallId: "nested-1", args: { name: "grandchild", task: "Inspect files" } }));
+  s.feed(event({ type: "tool_execution_end", toolName: "agent_task", toolCallId: "nested-1", result: {}, isError: true }));
   assert.equal(s.details.children, undefined);
   assert.equal(s.details.toolCalls, 1);
-  assert.deepEqual(s.details.activity, ["→ oneshot_subagent grandchild", "✗ oneshot_subagent failed"]);
+  assert.deepEqual(s.details.activity, ["→ agent_task grandchild", "✗ agent_task failed"]);
 });
 
 const callUsage = (input: number, output: number, cacheRead: number, cacheWrite: number) =>

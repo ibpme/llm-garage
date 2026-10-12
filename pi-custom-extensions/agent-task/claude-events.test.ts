@@ -18,7 +18,7 @@ test("Claude partial stream framing, tool activity and terminal authoritative an
   const assistant = { type: "assistant", message: { content: [{ type: "thinking", thinking: "secret" }, { type: "tool_use", id: "t1", name: "Read", input: { file_path: "file.ts" } }] } };
   s.feed(event(assistant)); s.feed(event(assistant));
   s.feed(event({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: true }] } }));
-  s.feed(event({ type: "assistant", parent_tool_use_id: "unexpected-subagent", message: { content: [{ type: "text", text: "wrong" }] } }));
+  s.feed(event({ type: "assistant", parent_tool_use_id: "unexpected-nested-agent", message: { content: [{ type: "text", text: "wrong" }] } }));
   const line = event(result());
   s.feed(line.slice(0, 40)); s.feed(line.slice(40), true);
   assert.equal(s.details.toolCalls, 1);

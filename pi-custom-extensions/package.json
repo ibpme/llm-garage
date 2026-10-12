@@ -19,14 +19,14 @@
     "typescript": "5.9.3"
   },
   "standaloneEntryPoints": [
-    "./oneshot-subagent/supervisor.ts"
+    "./agent-task/supervisor.ts"
   ],
   "pi": {
     "extensions": [
+      "./agent-task/index.ts",
       "./agents/index.ts",
       "./alias.ts",
       "./loaded-skills/index.ts",
-      "./oneshot-subagent/index.ts",
       "./permission-gate.ts",
       "./prompt-suggestions/index.ts",
       "./protected-paths.ts",

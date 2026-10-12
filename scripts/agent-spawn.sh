@@ -15,7 +15,7 @@ Options:
   --cwd PATH           Working directory (default: current directory)
   --shell SHELL        Login/interactive shell to initialize (bash or zsh; default: zsh)
   --agent AGENT        pi (default) or claude (JSON only)
-  --mode MODE          interactive (default) or json (one-shot event stream)
+  --mode MODE          interactive (default) or json (single-task event stream)
   --output-dir PATH    Parent directory for JSON job files (default: ~/.local/state/agent-spawn)
   --model ID           Model ID, forwarded unchanged
   --provider NAME      Pi model provider (requires --model); ignored for Claude
@@ -193,8 +193,8 @@ if [[ $mode == json ]]; then
   # tmux new-session inherits the server's global environment, not this client's,
   # so pass the child marker explicitly and clear any stale value on the server.
   env_bin=$(command -v env) || fail 'env is not on PATH'
-  child_env=(-u PI_ONESHOT_SUBAGENT_CHILD)
-  [[ ${PI_ONESHOT_SUBAGENT_CHILD-} != 1 ]] || child_env=(PI_ONESHOT_SUBAGENT_CHILD=1)
+  child_env=(-u PI_AGENT_TASK_CHILD)
+  [[ ${PI_AGENT_TASK_CHILD-} != 1 ]] || child_env=(PI_AGENT_TASK_CHILD=1)
   # Redirect before login-shell initialization so startup output is logged too.
   "${tmux_cmd[@]}" new-session -d -s "$session" -c "$cwd" "$env_bin" "${child_env[@]}" "$bash_bin" -c \
     'job_dir=$1; shift; exec "$@" </dev/null >"$job_dir/launch.log" 2>>"$job_dir/stderr.log"' \

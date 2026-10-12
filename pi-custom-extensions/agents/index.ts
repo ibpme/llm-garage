@@ -50,7 +50,7 @@ export async function picker(
   discoverAgents: (socket: string | undefined) => ReturnType<typeof discover> = (socket) => discover(socket, run, directory),
   performAction: typeof act = act,
   jobs: JobsApi = new AgentJobs(),
-  // Read on each use: a reload replaces the one-shot extension's published service.
+  // Read on each use: a reload replaces the agent-task extension's published service.
   foreground: () => ForegroundWaits | undefined = tryGetForegroundWaits,
 ): Promise<Choice | null> {
   let agents: Awaited<ReturnType<typeof discover>> = [];
@@ -194,7 +194,7 @@ export async function picker(
         pendingCancel = job;
       };
 
-      // The same transition as the one-shot shortcut; opening or closing this modal never changes waiting policy.
+      // The same transition as the agent-task shortcut; opening or closing this modal never changes waiting policy.
       const sendToBackground = async () => {
         const row = target();
         const job = ownedJob(row);

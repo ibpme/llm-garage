@@ -1,6 +1,6 @@
-# `/agents`: subagent jobs and Pi/Claude Code processes
+# `/agents`: agent task jobs and Pi/Claude Code processes
 
-Browse one-shot subagent jobs and live Pi and Claude Code processes. Pi discovery
+Browse agent task jobs and live Pi and Claude Code processes. Pi discovery
 uses a fresh `ps` snapshot; Claude discovery uses `claude agents --json`, then
 matches live PIDs in that snapshot. Both work without tmux. Inside tmux, process
 ancestry also maps processes to panes, including processes behind wrapper shells
@@ -42,7 +42,7 @@ List view:
 | Enter | Job or headless process: open details. Interactive tmux pane: switch the existing tmux client to its session, window and pane |
 | `c` | Cancel the selected job after an inline `[y/n]` confirmation naming it (owned, unfinished jobs only) |
 | `a` | Acknowledge the selected finished job (owned only). This clears it from this session's indicator and does not notify the model |
-| `b` | Send the selected foreground job to the background: its tool call returns a receipt and the same child keeps running. Only for running jobs of this session whose foreground wait is attached in this Pi; the same transition as the one-shot shortcut. Opening or closing the modal never changes a job's waiting mode |
+| `b` | Send the selected foreground job to the background: its tool call returns a receipt and the same child keeps running. Only for running jobs of this session whose foreground wait is attached in this Pi; the same transition as the agent-task shortcut. Opening or closing the modal never changes a job's waiting mode |
 | Shift+V (`V`) | Move the selected pane into the invoking window, above/below the invoking pane (`join-pane -v`) |
 | Shift+H (`H`) or Shift+Enter | Move the selected pane into the invoking window, left/right of the invoking pane (`join-pane -h`) |
 | Ctrl+X | Kill the selected agent's entire tmux pane (the current pane is protected; never offered for jobs) |

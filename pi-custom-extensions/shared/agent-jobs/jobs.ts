@@ -86,7 +86,7 @@ export function checkNode(node: string): Promise<void> {
     check = execText(node, ["-p", "`${process.version} ${process.features.typescript ?? false}`"]).then((output) => {
       const [version, mode] = output.trim().split(" ");
       if (mode !== "strip" && mode !== "transform")
-        throw new Error(`Background subagents need Node.js with TypeScript type stripping enabled by default (22.18+ or 23.6+); ${node} is ${version ?? "unknown"}`);
+        throw new Error(`Background agent tasks need Node.js with TypeScript type stripping enabled by default (22.18+ or 23.6+); ${node} is ${version ?? "unknown"}`);
     });
     check.catch(() => nodeChecks.delete(node));
     nodeChecks.set(node, check);
@@ -157,8 +157,8 @@ export class AgentJobs {
       const snapshot = await this.inspect(id);
       const state = snapshot?.status.state;
       if (snapshot && state && isTerminal(state)) {
-        if (cancelled && signal?.aborted) throw new Error("Background subagent launch was cancelled");
-        throw new Error(`Background subagent failed to start (${state}): ${snapshot.status.terminalReason ?? "no reason recorded"}` +
+        if (cancelled && signal?.aborted) throw new Error("Background agent task launch was cancelled");
+        throw new Error(`Background agent task failed to start (${state}): ${snapshot.status.terminalReason ?? "no reason recorded"}` +
           (snapshot.status.stderrTail ? `\n\n${snapshot.status.stderrTail}` : "") + `\n\n[Job files: ${dir}]`);
       }
       if (!cancelled && (state === "running" || state === "cancelling")) return snapshot!;
@@ -169,10 +169,10 @@ export class AgentJobs {
           details: { activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 },
         }, "failed", "Supervisor exited during launch"));
         const log = (await readTail(join(dir, "supervisor.log")).catch(() => undefined))?.trim();
-        throw new Error(`Background subagent supervisor exited during launch${log ? `:\n${log}` : ""}\n\n[Job files: ${dir}]`);
+        throw new Error(`Background job supervisor exited during launch${log ? `:\n${log}` : ""}\n\n[Job files: ${dir}]`);
       }
       if (cancelled && Date.now() > ackDeadline + 20_000) {
-        throw new Error(`Background subagent launch did not settle; job files: ${dir}`);
+        throw new Error(`Background agent task launch did not settle; job files: ${dir}`);
       }
       await sleep(100);
     }

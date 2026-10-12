@@ -1,5 +1,5 @@
-export const ROLE_ENTRY = "oneshot-subagent-role";
-export const CHILD_ENV = "PI_ONESHOT_SUBAGENT_CHILD";
+export const ROLE_ENTRY = "agent-task-role";
+export const CHILD_ENV = "PI_AGENT_TASK_CHILD";
 
 export type Role = "root" | "child";
 

@@ -9,7 +9,7 @@ import { AgentJobs } from "../shared/agent-jobs/jobs.ts";
 import { tryGetForegroundWaits } from "../shared/agent-jobs/foreground.ts";
 import type { ToolSet } from "../tool-set/contracts.ts";
 import { publishToolSet } from "../tool-set/service.ts";
-import oneshotSubagentExtension from "./index.ts";
+import agentTaskExtension from "./index.ts";
 import { CHILD_ENV, ROLE_ENTRY } from "./role.ts";
 import type { RunDetails } from "./events.ts";
 import { installFakeAgents, stopFakeAgents } from "./fake-agents.fixture.ts";
@@ -17,7 +17,7 @@ import type { ReceiptDetails } from "./index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const supervisor = resolve(here, "supervisor.ts");
-const scratch = await mkdtemp(join(tmpdir(), "oneshot-index-test-"));
+const scratch = await mkdtemp(join(tmpdir(), "agent-task-index-test-"));
 test.after(() => rm(scratch, { recursive: true, force: true }));
 
 interface Options { configPath?: string; keybindingsPath?: string }
@@ -33,7 +33,7 @@ function register(env: Record<string, string> = {}, jobs?: AgentJobs, sessionId 
   delete process.env[CHILD_ENV];
   Object.assign(process.env, env);
   try {
-    oneshotSubagentExtension({
+    agentTaskExtension({
       registerTool: (value: ToolDefinition<any>) => { tools.push(value); },
       registerMessageRenderer: () => {},
       registerCommand: () => {},
@@ -55,8 +55,8 @@ function register(env: Record<string, string> = {}, jobs?: AgentJobs, sessionId 
   const ui = { notify: (message: string) => notices.push(message), select: async (_title: string, options: string[]) => choose(options) };
   const instance = { shortcuts, notices, choose: (pick: typeof choose) => { choose = pick; },
     background: () => shortcuts.get("shift+up")!({ ...context, ui }),
-    get tool() { return tools.find((tool) => tool.name === "oneshot_subagent"); },
-    get jobsTool() { return tools.find((tool) => tool.name === "subagent_jobs"); }, tools, handlers, entries, messages, context,
+    get tool() { return tools.find((tool) => tool.name === "agent_task"); },
+    get jobsTool() { return tools.find((tool) => tool.name === "jobs"); }, tools, handlers, entries, messages, context,
     start: async () => { await handlers.get("session_start")!({}, context); return instance; } };
   return instance;
 }
@@ -68,10 +68,10 @@ test("root registers the tool at session start, inherits model, and forwards alr
   const root = register();
   assert.equal(root.tools.length, 0, "role is unknown until the session is read");
   await root.start();
-  assert.deepEqual(root.tools.map((tool) => tool.name), ["oneshot_subagent", "subagent_jobs"]);
+  assert.deepEqual(root.tools.map((tool) => tool.name), ["agent_task", "jobs"]);
   await root.start();
   assert.equal(root.tools.length, 2, "registered once");
-  assert.equal(root.tool?.name, "oneshot_subagent");
+  assert.equal(root.tool?.name, "agent_task");
   assert.equal(root.tool?.renderShell, "self", "must not use Pi's colored tool shell");
   assert.equal(root.tool?.exposure, "direct");
   assert.doesNotMatch(root.tool!.description, /depth/i);
@@ -83,7 +83,7 @@ test("root registers the tool at session start, inherits model, and forwards alr
   await root.handlers.get("session_shutdown")!({ reason: "quit" });
 });
 
-test("one-shot children never register the tool and persist their role once", async () => {
+test("agent-task children never register the tool and persist their role once", async () => {
   const child = register({ [CHILD_ENV]: "1" });
   await child.start();
   await child.start();
@@ -142,10 +142,10 @@ test("Claude ignores provider without model, does not inherit Pi defaults, and v
 test("background mode: receipt, owner-scoped retrieval, usage once, notices, reminder and shutdown survival", async (t) => {
   const root = await mkdtemp(join(scratch, "bg-"));
   const bin = await installFakeAgents(root);
-  const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
+  const previous = { PATH: process.env.PATH, AGENT_TASK_TEST_CASE: process.env.AGENT_TASK_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const jobs = new AgentJobs({ root: join(root, "state"), supervisor });
-  const configPath = join(root, "oneshot-subagent.json");
+  const configPath = join(root, "agent-task.json");
   await writeFile(configPath, JSON.stringify({ completionNotice: "steer" }));
   const owner = await register({}, jobs, "owner-session", { configPath }).start();
   const other = await register({}, jobs, "other-session", { configPath }).start();
@@ -157,7 +157,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
   };
   try {
     await t.test("shipped background default: launch returns a receipt promptly, not an answer", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await run(owner, "tool", { task: "Long task", name: "long" });
       assert.equal(receipt.isError, undefined);
       const details = receipt.details as { kind: string; jobId: string };
@@ -171,8 +171,8 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
       assert.equal(last.role, "custom");
       assert.match(last.content, new RegExp(details.jobId));
       assert.equal(await reminder(other), undefined, "other sessions get no reminder");
-      await assert.rejects(run(other, "jobsTool", { action: "result", job_id: details.jobId }), /No subagent job/);
-      await assert.rejects(run(other, "jobsTool", { action: "cancel", job_id: details.jobId }), /No subagent job/);
+      await assert.rejects(run(other, "jobsTool", { action: "result", job_id: details.jobId }), /No agent task job/);
+      await assert.rejects(run(other, "jobsTool", { action: "cancel", job_id: details.jobId }), /No agent task job/);
       // Reload/exit must not cancel accepted background jobs.
       await owner.handlers.get("session_shutdown")!({ reason: "quit" });
       await owner.start();
@@ -189,7 +189,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     });
 
     await t.test("an explicit foreground mode overrides the background default", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const result = await run(owner, "tool", { task: "Wait for it", name: "fg-explicit", mode: "foreground" });
       assert.equal((result.details as RunDetails).status, "success");
       assert.match((result.content[0] as { text: string }).text, /Final 😀 answer/);
@@ -197,7 +197,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     });
 
     await t.test("result retrieves a finished answer and reports usage exactly once", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const receipt = await run(owner, "tool", { task: "Quick task", name: "quick" });
       const jobId = (receipt.details as { jobId: string }).jobId;
       await jobs.wait([jobId], 20_000);
@@ -212,7 +212,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     });
 
     await t.test("failed jobs are retrieved as errors with the partial-changes warning; notices are sent once and wake the model as configured", async () => {
-      process.env.ONESHOT_TEST_CASE = "error";
+      process.env.AGENT_TASK_TEST_CASE = "error";
       const receipt = await run(owner, "tool", { task: "Failing task", name: "failing" });
       const jobId = (receipt.details as { jobId: string }).jobId;
       await jobs.wait([jobId], 15_000);
@@ -222,7 +222,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
       const notices = owner.messages.filter((item) => item.message.content.includes(jobId));
       assert.equal(notices.length, 1);
       assert.deepEqual(notices[0].options, { triggerTurn: true, deliverAs: "steer" });
-      assert.equal(notices[0].message.customType, "subagent-job-notice");
+      assert.equal(notices[0].message.customType, "agent-job-notice");
       assert.ok(!other.messages.some((item) => item.message.content.includes(jobId)), "never delivered to another session");
       assert.match((await reminder(owner)).content, new RegExp(jobId), "a notice alone does not clear the reminder");
       const result = await run(owner, "jobsTool", { action: "result", job_id: jobId });
@@ -234,7 +234,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     });
 
     await t.test("concurrency limit names the active jobs", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const ids: string[] = [];
       for (let i = 0; i < 4; i++) ids.push(((await run(owner, "tool", { task: "Hang", name: `h${i}` })).details as { jobId: string }).jobId);
       await assert.rejects(run(owner, "tool", { task: "One too many" }), new RegExp(`At most 4.*${ids[0]}`));
@@ -269,9 +269,9 @@ test("children register neither delegation nor job tools", async () => {
 test("session_shutdown aborts in-flight foreground runs for every reason", async () => {
   const root = await mkdtemp(join(scratch, "fg-"));
   const bin = await installFakeAgents(root);
-  const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
+  const previous = { PATH: process.env.PATH, AGENT_TASK_TEST_CASE: process.env.AGENT_TASK_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
-  process.env.ONESHOT_TEST_CASE = "hang";
+  process.env.AGENT_TASK_TEST_CASE = "hang";
   try {
     await Promise.all((["quit", "reload", "new", "resume", "fork"] as const).map(async (reason) => {
       const instance = await register({}, new AgentJobs({ root: join(root, "state"), supervisor })).start();
@@ -300,7 +300,7 @@ test("config: missing file uses the background default and the shortcut; disabli
   const disabled = await register({}, undefined, "session-1", { configPath }).start();
   assert.equal(disabled.shortcuts.size, 0);
   const keybindingsPath = join(scratch, "keybindings.json");
-  await writeFile(keybindingsPath, JSON.stringify({ "extensions.oneshotSubagent.background": ["alt+b", "ctrl+alt+b"] }));
+  await writeFile(keybindingsPath, JSON.stringify({ "extensions.agentTask.background": ["alt+b", "ctrl+alt+b"] }));
   const rebound = register({}, undefined, "session-1", { keybindingsPath });
   assert.deepEqual([...rebound.shortcuts.keys()], ["alt+b", "ctrl+alt+b"]);
 });
@@ -308,10 +308,10 @@ test("config: missing file uses the background default and the shortcut; disabli
 test("foreground jobs are supervised: answer, send to background, Esc and shortcut targeting", async (t) => {
   const root = await mkdtemp(join(scratch, "fg-bg-"));
   const bin = await installFakeAgents(root);
-  const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
+  const previous = { PATH: process.env.PATH, AGENT_TASK_TEST_CASE: process.env.AGENT_TASK_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const jobs = new AgentJobs({ root: join(root, "state"), supervisor });
-  const configPath = join(root, "oneshot-subagent.json");
+  const configPath = join(root, "agent-task.json");
   await writeFile(configPath, JSON.stringify({ defaultMode: "foreground" }));
   const owner = await register({}, jobs, "fg-owner", { configPath }).start();
   const run = (params: Record<string, unknown>, signal?: AbortSignal, updates?: RunDetails[]) =>
@@ -328,7 +328,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
   };
   try {
     await t.test("configured foreground default returns the final answer with usage once and no completion notice", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const updates: RunDetails[] = [];
       const result = await run({ task: "Quick", name: "quick" }, undefined, updates);
       const details = result.details as RunDetails;
@@ -348,11 +348,11 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
 
     await t.test("no eligible job: the shortcut only informs", async () => {
       await owner.background();
-      assert.match(owner.notices.at(-1)!, /No foreground subagent is running/);
+      assert.match(owner.notices.at(-1)!, /No foreground agent task is running/);
     });
 
     await t.test("the shortcut releases the same running job with a receipt; shutdown no longer cancels it", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const pending = run({ task: "Slow", name: "slow", timeout_seconds: 120 });
       const [job] = await attached(1);
       await owner.background();
@@ -362,7 +362,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
       assert.equal(details.backgrounded, true);
       assert.equal(details.jobId, job.id);
       assert.equal(receipt.usage, undefined, "receipts carry no usage");
-      assert.match((receipt.content[0] as { text: string }).text, /sent foreground subagent .* to the background.*original 120s timeout/s);
+      assert.match((receipt.content[0] as { text: string }).text, /sent foreground agent task .* to the background.*original 120s timeout/s);
       const after = (await jobs.inspect(job.id))!;
       assert.equal(after.status.state, "running");
       assert.equal(after.waitPolicy, "background");
@@ -376,7 +376,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
     });
 
     await t.test("multiple eligible jobs use a chooser; cancelling it changes nothing; /agents' service releases the other", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const first = run({ task: "One", name: "first" });
       const second = run({ task: "Two", name: "second" });
       const running = await attached(2);
@@ -403,7 +403,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
     });
 
     await t.test("Esc on a foreground call cancels its job", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const controller = new AbortController();
       const pending = run({ task: "Cancel me", name: "esc" }, controller.signal);
       const [job] = await attached(1);
@@ -415,7 +415,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
     });
 
     await t.test("an explicit background mode overrides the foreground default", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const receipt = await run({ task: "Bg", name: "explicit", mode: "background" });
       assert.equal((receipt.details as ReceiptDetails).backgrounded, false);
       assert.match((receipt.content[0] as { text: string }).text, /was accepted and (is|has already finished)/);

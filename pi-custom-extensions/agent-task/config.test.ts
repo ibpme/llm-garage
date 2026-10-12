@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { DEFAULT_CONFIG, loadConfig } from "./config.ts";
 
-const root = await mkdtemp(join(tmpdir(), "oneshot-config-"));
+const root = await mkdtemp(join(tmpdir(), "agent-task-config-"));
 test.after(() => rm(root, { recursive: true, force: true }));
 const write = async (name: string, content: string) => { const path = join(root, name); await writeFile(path, content); return path; };
 
@@ -16,7 +16,7 @@ test("missing config uses the shipped defaults silently", () => {
 });
 
 test("the tracked default file matches the built-in defaults", async () => {
-  const tracked = resolve(dirname(fileURLToPath(import.meta.url)), "../../pi-custom-config/oneshot-subagent.json");
+  const tracked = resolve(dirname(fileURLToPath(import.meta.url)), "../../pi-custom-config/agent-task.json");
   assert.deepEqual(JSON.parse(await readFile(tracked, "utf8")), DEFAULT_CONFIG);
 });
 

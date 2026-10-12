@@ -22,7 +22,7 @@ cat > "$tmp/bin/pi" <<'SH'
 #!/bin/bash
 printf '%s\n' "$@" > "$TEST_ARGS"
 printf '%s\n' "${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-unset}" > "$TEST_ADVISOR"
-printf '%s\n' "${PI_ONESHOT_SUBAGENT_CHILD:-unset}" > "$TEST_CHILD"
+printf '%s\n' "${PI_AGENT_TASK_CHILD:-unset}" > "$TEST_CHILD"
 sleep 1
 printf '{"type":"test"}\n'
 printf 'test stderr\n' >&2
@@ -212,8 +212,8 @@ grep -F -- '--mode json requires --prompt or --prompt-file' "$tmp/error" >/dev/n
 # a stale marker in the server's global environment must not leak into normal launches.
 # Bash 3.2 (macOS /bin/bash) ignores failed [[ ]] under set -e, so assert explicitly.
 expect_child() {
-  local name=$1 marker=$2 expected=$3 output job marker_env=(-u PI_ONESHOT_SUBAGENT_CHILD)
-  [[ $marker != 1 ]] || marker_env=(PI_ONESHOT_SUBAGENT_CHILD=1)
+  local name=$1 marker=$2 expected=$3 output job marker_env=(-u PI_AGENT_TASK_CHILD)
+  [[ $marker != 1 ]] || marker_env=(PI_AGENT_TASK_CHILD=1)
   rm -f "$TEST_CHILD"
   output=$(env "${marker_env[@]}" /bin/bash "$root/scripts/agent-spawn.sh" --name "$name" \
     --mode json --shell bash --cwd "$tmp/work" --output-dir "$tmp/jobs" --prompt test)
@@ -224,11 +224,11 @@ expect_child() {
     || { printf '%s: expected child marker %s, got %s\n' "$name" "$expected" "$(cat "$TEST_CHILD")" >&2; exit 1; }
 }
 tmux kill-server 2>/dev/null || :
-env -u PI_ONESHOT_SUBAGENT_CHILD tmux new-session -d -s anchor sleep 600
+env -u PI_AGENT_TASK_CHILD tmux new-session -d -s anchor sleep 600
 expect_child marked-child 1 1
 expect_child normal-root unset unset
 tmux kill-server 2>/dev/null || :
-PI_ONESHOT_SUBAGENT_CHILD=1 tmux new-session -d -s anchor sleep 600
+PI_AGENT_TASK_CHILD=1 tmux new-session -d -s anchor sleep 600
 expect_child stale-root unset unset
 expect_child stale-marked-child 1 1
 tmux kill-server 2>/dev/null || :

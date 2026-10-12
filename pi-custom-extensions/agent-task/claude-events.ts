@@ -69,7 +69,7 @@ export class ClaudeEventState {
   }
 
   private accept(event: JsonObject): void {
-    // Leaf runs should never contain subagent messages. Do not let any that
+    // Leaf runs should never contain nested agent messages. Do not let any that
     // appear overwrite the main response or double-count its tools.
     if (event.parent_tool_use_id) return;
     if (event.type === "system" && event.subtype === "init") {

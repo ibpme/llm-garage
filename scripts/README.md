@@ -1,6 +1,6 @@
 # Agent launcher
 
-[`agent-spawn.sh`](agent-spawn.sh) starts interactive Pi or a one-shot
+[`agent-spawn.sh`](agent-spawn.sh) starts interactive Pi or a single-task
 Pi/Claude Code JSON job in a detached tmux session. It initializes
 an interactive login shell before resolving the agent executable, so shell
 startup files can supply credentials and update `PATH`.
@@ -157,7 +157,7 @@ configuration; shell startup files also execute. A prompt saying â€œdo not editâ
 is not an enforced read-only boundary.
 
 Pi uses its normal configuration and tools. The raw launcher does not mark Pi
-as a one-shot leaf or disable its delegation extensions.
+as an agent-task leaf or disable its delegation extensions.
 
 Claude JSON jobs use a restricted built-in tool set:
 `Read`, `Glob`, `Grep`, `Edit`, `Write`, `Bash`, `WebFetch`, and `WebSearch`.
@@ -169,10 +169,10 @@ is disabled.
 Claude's normal settings, hooks, plugins, and discovered skill context can
 still load. Allowed shell commands or hooks can launch other processes, so the
 leaf tool policy is not process isolation. See the
-[one-shot extension's Claude leaf policy](../pi-custom-extensions/oneshot-subagent/README.md#claude-leaf-capabilities)
+[agent-task extension's Claude leaf policy](../pi-custom-extensions/agent-task/README.md#claude-leaf-capabilities)
 for details.
 
-The [one-shot subagent extension](../pi-custom-extensions/oneshot-subagent/README.md)
+The [agent-task extension](../pi-custom-extensions/agent-task/README.md)
 wraps this launcher with a detached per-job supervisor, final-answer extraction,
 cancellation, timeouts, foreground/background waiting and root/leaf delegation
 guards. Those are extension features, not guarantees of the raw script. The [`/agents` extension](../pi-custom-extensions/agents/README.md)

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ProcessIdentity } from "../process-identity.ts";
 
 // Durable background-job records. Only files in this layout are jobs; any other
-// directory under the agent-spawn root (including earlier `oneshot-*` runs) is ignored.
+// directory under the agent-spawn root is ignored.
 //
 // <root>/jobs/<id>/
 //   job.json        immutable request, written by the launching session

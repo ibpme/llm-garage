@@ -14,7 +14,7 @@ export interface AttachedJob {
  */
 export type BackgroundOutcome = "backgrounded" | "completed" | "not-attached";
 
-/** Foreground one-shot waits attached to this Pi process. */
+/** Foreground agent-task waits attached to this Pi process. */
 export interface ForegroundWaits {
   /** Owned jobs whose foreground wait is still attached and unsettled, oldest first. */
   attached(owner: string): AttachedJob[];

@@ -20,9 +20,9 @@ link_pi_extensions "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
 # Install mutable extension defaults once. Unlike extensions and keybindings,
 # these must be normal files: they hold local preferences (prompt suggestions
-# are toggled at runtime; one-shot subagent modes are edited by hand) that
+# are toggled at runtime; agent-task modes are edited by hand) that
 # should not modify this repository or be overwritten by a later sync.
-for config in prompt-suggestions.json oneshot-subagent.json; do
+for config in prompt-suggestions.json agent-task.json; do
   if [ ! -e "$TARGET/$config" ] && [ ! -L "$TARGET/$config" ]; then
     cp "$REPO_ROOT/pi-custom-config/$config" "$TARGET/$config"
     echo "installed default $TARGET/$config"

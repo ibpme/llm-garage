@@ -1,12 +1,12 @@
-# One-shot subagent
+# Agent task
 
-This is a prototype for the broader subagent feature under development. Its
-one-shot lifecycle and Claude leaf policy are intentionally limited; the
+This is a prototype for the broader agent delegation feature under development. Its
+single-task lifecycle and Claude leaf policy are intentionally limited; the
 interface may evolve as that feature takes shape.
 
-Adds `oneshot_subagent`, a model-callable tool that delegates a standalone task to
+Adds `agent_task`, a model-callable tool that delegates a standalone task to
 a fresh Pi or Claude Code process using this repository's `scripts/agent-spawn.sh --mode json`,
-and `subagent_jobs`, which manages the resulting jobs. Both are registered in root
+and `jobs`, which manages the resulting jobs. Both are registered in root
 sessions only. They work in interactive, print, and JSON modes.
 
 Every delegation is a durable, independently supervised job. The waiting mode only
@@ -14,7 +14,7 @@ decides what the tool call does meanwhile:
 
 - **Background** (shipped default): the call returns a job receipt as soon as the
   child has started, and the main agent keeps working. The answer is collected
-  with `subagent_jobs` after the completion notice.
+  with `jobs` after the completion notice.
 - **Foreground**: the call waits and returns the final answer and usage. The user
   can send it to the background while it runs; the call then returns a receipt
   and the same child keeps running.
@@ -23,9 +23,9 @@ An explicit `mode` always wins; omitting it uses the configured default.
 
 ## Configuration
 
-Local preferences live in `oneshot-subagent.json` in Pi's agent directory
+Local preferences live in `agent-task.json` in Pi's agent directory
 (`~/.pi/agent/` by default). `sync/sync-pi.sh` copies the tracked default from
-`pi-custom-config/oneshot-subagent.json` only when the file is missing, so local
+`pi-custom-config/agent-task.json` only when the file is missing, so local
 edits survive sync and unsync.
 
 ```json
@@ -69,7 +69,7 @@ Rebind the shortcut in Pi's `keybindings.json` (this repository's tracked
 `pi-custom-keybinds/keybindings.json` once synced):
 
 ```json
-{ "extensions.oneshotSubagent.background": ["shift+up"] }
+{ "extensions.agentTask.background": ["shift+up"] }
 ```
 
 There is no way back to the foreground, and a job cannot be messaged or resumed.
@@ -79,19 +79,19 @@ There is no way back to the foreground, and a job cannot be messaged or resumed.
 Ask Pi to delegate a task, or call the tool through codemode:
 
 ```js
-const receipt = await tools.oneshot_subagent({
+const receipt = await tools.agent_task({
   name: "review-api",
   task: "Review src/api for correctness and missing tests. Do not edit files. Return findings with file paths and line numbers.",
 });
 // ... unrelated work ...
-text(await tools.subagent_jobs({ action: "result", job_id: receipt.details.jobId }));
+text(await tools.jobs({ action: "result", job_id: receipt.details.jobId }));
 ```
 
 | Parameter | Default |
 |---|---|
 | `agent` | `pi`; use `claude` for Claude Code |
 | `task` | Required complete, standalone task |
-| `name` | `subagent`; letters, digits, underscores, hyphens |
+| `name` | `agent`; letters, digits, underscores, hyphens |
 | `cwd` | Main agent's working directory; relative paths resolve from there |
 | `model` | Pi: parent model ID; Claude: its own configured default |
 | `provider` | Pi: parent provider when inheriting the model, otherwise requires explicit `model`; Claude: ignored, even without `model` |
@@ -115,7 +115,7 @@ refused while four jobs (of either mode) are active in the session, naming the
 active jobs (there is no queue); foreground launches are not limited, and sending
 a job to the background does not check the limit.
 
-`subagent_jobs` operates only on jobs owned by the calling session:
+`jobs` operates only on jobs owned by the calling session:
 
 | `action` | Behavior |
 |---|---|
@@ -142,7 +142,7 @@ survives compaction without changing the cached prompt prefix.
 
 When background jobs finish, the extension (which already polls job state) sends
 the owning session a short completion notice: state and job ID, not the answer.
-The model then retrieves the answer with `subagent_jobs` `result`. There is no
+The model then retrieves the answer with `jobs` `result`. There is no
 blocking wait action; a model with nothing else to do ends its turn and is woken
 by the notice. `completionNotice` selects the delivery:
 
@@ -171,7 +171,7 @@ acknowledged in `/agents`; a completion notice alone does not clear them.
 ### Supervision and exit
 
 Every job, foreground or background, runs under its own detached supervisor
-(`node oneshot-subagent/supervisor.ts <root> <job-id>`, a new session without a
+(`node agent-task/supervisor.ts <root> <job-id>`, a new session without a
 terminal). The supervisor owns the launch, deadline, event parsing, result
 validation and `final-response.md`. The launcher hosts the child in a detached
 tmux session, so launching requires tmux, but Pi need not run inside tmux and
@@ -180,12 +180,12 @@ it polls the job's durable status for progress and the final answer.
 
 | Event | Foreground (attached wait) | Background (or sent to background) |
 |---|---|---|
-| Normal completion | Tool returns the final answer and usage | Notice (wakes the model unless `passive`); answer via `subagent_jobs` `result` |
+| Normal completion | Tool returns the final answer and usage | Notice (wakes the model unless `passive`); answer via `jobs` `result` |
 | User sends it to the background | Wait released; tool returns a receipt | Already background; no change |
 | Esc during launch or tool execution | Job cancelled | Launch cancelled if not yet acknowledged; otherwise continues |
 | `/reload`, quit, `/new`, `/resume`, fork | Job cancelled | Continues; ownership stays with the launching session |
 | Pi crashes or loses its terminal | Job continues without a waiter; its result stays retrievable | Continues; results stay viewable in `/agents` |
-| Explicit cancel (`subagent_jobs` or `/agents`) | Process group stopped (SIGTERM, then SIGKILL) | Same |
+| Explicit cancel (`jobs` or `/agents`) | Process group stopped (SIGTERM, then SIGKILL) | Same |
 | Deadline | Process group stopped; recorded as timed-out | Same |
 | Supervisor killed with SIGTERM/SIGINT | Child stopped; recorded as interrupted | Same |
 | Supervisor disappears | Shown as status unknown while the child runs; the foreground wait gives up and cancels 30s after the deadline | While the child still runs the job is shown as status unknown and remains cancellable; otherwise it is recorded as interrupted. Success is never inferred |
@@ -193,7 +193,7 @@ it polls the job's durable status for progress and the final answer.
 The waiting mode is recorded durably (`job.json` `mode` plus a `backgrounded`
 marker) for `/agents` labels and notices; whether a foreground wait is still
 attached is known only to the Pi process that launched it. There is no exit
-prompt yet; cancel background jobs from `/agents` or with `subagent_jobs` before
+prompt yet; cancel background jobs from `/agents` or with `jobs` before
 exiting if they should not continue.
 
 The supervisor runs TypeScript directly with Node's built-in type stripping and
@@ -213,7 +213,7 @@ When omitted, Claude's own model and effort configuration applies.
 Use separate `model` and `effort` fields for portable call structure:
 
 ```js
-text(await tools.oneshot_subagent({
+text(await tools.agent_task({
   agent: "claude",
   name: "review-api",
   task: "Review src/api. Read files only; return findings with paths and line numbers.",
@@ -253,7 +253,7 @@ All other built-in tools are excluded by `--tools`. In particular:
 | Disabled capability | Mechanism |
 |---|---|
 | Advisor tool and configured advisor model | `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` for Claude JSON-mode children only; set after login-shell initialization. Future non-JSON launches retain their advisor configuration |
-| Native subagents, including Explore/Plan agents | `Agent` and legacy `Task` omitted from allowlist and explicitly denied with `--disallowedTools Agent,Task` |
+| Native `Agent`/`Task` delegation, including Explore/Plan agents | `Agent` and legacy `Task` omitted from allowlist and explicitly denied with `--disallowedTools Agent,Task` |
 | Agent teams, task-management tools, scheduling, worktree tools and other built-in orchestration | Not in the tool allowlist |
 | Interactive questions and planning-mode transitions (`AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`) | Not in the tool allowlist |
 | Model-invoked skill execution (`Skill`) and tool discovery | Not in the tool allowlist |
@@ -276,19 +276,19 @@ on arbitrary process spawning/customizations are deferred.
 Only a root session (a Pi session not launched by this extension) can delegate:
 
 ```text
-main agent (root) -> one-shot child (leaf)
+main agent (root) -> agent-task child (leaf)
 ```
 
 Every child, Pi or Claude, is a leaf. There is no depth setting; to turn
 delegation off, disable the extension in Pi.
 
-The runner launches children with `PI_ONESHOT_SUBAGENT_CHILD=1`, and a child does
-not register `oneshot_subagent` at all. On `session_start` a child appends an
-`oneshot-subagent-role` session entry, so reload, resume, and fork restore the
+The runner launches children with `PI_AGENT_TASK_CHILD=1`, and a child does
+not register `agent_task` at all. On `session_start` a child appends an
+`agent-task-role` session entry, so reload, resume, and fork restore the
 role without the environment. A child's task is prefixed with a short note that it cannot
 delegate.
 
-The marker means "one-shot child", not "any spawned agent": only this runner sets
+The marker means "agent-task child", not "any spawned agent": only this runner sets
 it. `scripts/agent-spawn.sh` is a plain launcher with no child guard, so other
 launches (such as future interactive tmux agents) are not restricted by it.
 
@@ -334,7 +334,7 @@ Expand the result using Pi's normal tool expansion to see activity, working
 directory/model, Markdown output, and the job directory. Thinking content is not
 displayed or returned.
 
-Results saved by earlier versions that contain nested subagent snapshots still
+Results saved by earlier versions that contain nested agent snapshots still
 render: only the top-level run is shown, with a "nested runs: see job logs" notice.
 
 ## Lifecycle and failures
@@ -350,7 +350,7 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
 - Pi usage is summed from completed assistant/tool-result messages for run
   accounting and cost. Claude cumulative usage is summed the same way, per message
   ID, before a result. The displayed token breakdown for both backends is the latest
-  completed assistant call only: tool-result, user, and nested-subagent events never
+  completed assistant call only: tool-result, user, and nested-agent events never
   replace it, and a completion without usage clears it rather than showing older
   data. Terminal totals do not replace it either; the last completed call stays
   displayed through the final result. Claude completion is a `message_stop` or
@@ -368,8 +368,8 @@ render: only the top-level run is shown, with a "nested runs: see job logs" noti
   `final-response.md`. Expand shows the same bounded result; read the file for more.
 
 Jobs of both modes live in private (`0700`/`0600`) directories under
-`${XDG_STATE_HOME:-~/.local/state}/agent-spawn/jobs/<job-id>/`. Earlier
-foreground runs under `agent-spawn/oneshot-*/` are inert history; remove them
+`${XDG_STATE_HOME:-~/.local/state}/agent-spawn/jobs/<job-id>/`. Other
+directories under `agent-spawn/`, left by earlier versions, are inert history; remove them
 manually when no longer needed.
 
 | File | Contents |
@@ -383,8 +383,8 @@ manually when no longer needed.
 
 States: starting, running, cancelling, succeeded, failed, cancelled, timed-out,
 interrupted. Terminal results are immutable, and PID plus process start time are
-verified before any signal. Directories without this metadata, including earlier
-`oneshot-*` runs, are ignored. Retention is lazy, on listing: finished jobs whose
+verified before any signal. Directories without this metadata, including those left
+by earlier versions, are ignored. Retention is lazy, on listing: finished jobs whose
 result was retrieved or acknowledged are deleted after 14 days, and beyond the
 newest 200 finished jobs per session. Running jobs and unretrieved results are
 never pruned. These files can contain sensitive prompts, tool arguments and
@@ -412,13 +412,13 @@ No extra dependencies are needed; configuration is optional (see above).
 
 ```bash
 cd pi-custom-extensions
-node --experimental-strip-types --test oneshot-subagent/*.test.ts
+node --experimental-strip-types --test agent-task/*.test.ts
 bun run check
 ```
 
 The runner, supervisor and extension tests use the real launcher and detached
 supervisor with fake login shells and fake Pi/Claude (`fake-agents.fixture.ts`);
 they do not make model calls. The fixture's `tmux` targets a private server and
-passes `PATH` and `ONESHOT_TEST_CASE` to each new session, because tmux sessions
+passes `PATH` and `AGENT_TASK_TEST_CASE` to each new session, because tmux sessions
 inherit the server's environment rather than the launching client's. Interactive rendering and live-provider calls
 still need a manual smoke test.

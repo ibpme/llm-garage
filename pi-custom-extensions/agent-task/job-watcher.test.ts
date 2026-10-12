@@ -112,7 +112,7 @@ test("receipts state the observed state and are labeled as receipts; run details
   assert.match(receiptText(running, false), /was accepted and is running for 1m 5s.*timeout 1800s.*This is a receipt, not its answer/s);
   const finished = job("succeeded");
   const released = receiptText(finished, true);
-  assert.match(released, /sent foreground subagent .* to the background; it has already finished \(succeeded\)/);
+  assert.match(released, /sent foreground agent task .* to the background; it has already finished \(succeeded\)/);
   assert.match(released, /original 1800s timeout still applies/);
   assert.match(released, new RegExp(`"job_id":"${finished.id}"`));
   const latest = { input: 5, output: 2, cacheRead: 100, cacheWrite: 1 };

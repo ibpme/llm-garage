@@ -34,9 +34,9 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms 
 }
 
 test("detached supervisor runs background jobs independently of the launching process", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "oneshot-jobs-test-"));
+  const root = await mkdtemp(join(tmpdir(), "agent-task-jobs-test-"));
   const bin = await installFakeAgents(root);
-  const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
+  const previous = { PATH: process.env.PATH, AGENT_TASK_TEST_CASE: process.env.AGENT_TASK_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const jobs = new AgentJobs({ root: join(root, "state"), supervisor });
   const request = (overrides: Partial<StartRequest> = {}): StartRequest => ({
@@ -46,7 +46,7 @@ test("detached supervisor runs background jobs independently of the launching pr
   });
   try {
     await t.test("success: prompt acknowledgement, durable private result, plain task kept", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const started = Date.now();
       const receipt = await jobs.start(request());
       assert.ok(Date.now() - started < 5_000);
@@ -69,7 +69,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     for (const mode of ["error", "exit"]) await t.test(`${mode} is recorded as failed with a reason`, async () => {
-      process.env.ONESHOT_TEST_CASE = mode;
+      process.env.AGENT_TASK_TEST_CASE = mode;
       const receipt = await jobs.start(request());
       const [done] = await jobs.wait([receipt.id], 15_000);
       assert.equal(done.status.state, "failed");
@@ -77,7 +77,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("snapshots carry latest-call tokens and capacity from the parent's verified table only", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const verified = await jobs.start(request({ mode: "foreground", contextWindows: [["fake-provider", "fake-model", 200_000], ["other", "fake-model", 1]] }));
       const [done] = await jobs.wait([verified.id], 15_000);
       assert.deepEqual(done.status.details.latestCallUsage, { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 });
@@ -92,7 +92,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("deadline stops the process group and records timed-out", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await jobs.start(request({ timeoutSeconds: 1 }));
       const [done] = await jobs.wait([receipt.id], 15_000);
       assert.equal(done.status.state, "timed-out");
@@ -100,7 +100,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("owner cancellation is idempotent and stops the process group; others cannot cancel", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await jobs.start(request());
       assert.equal((await jobs.cancel(receipt.id, "intruder")).outcome, "not-owner");
       const waited = await jobs.wait([receipt.id], 300);
@@ -114,7 +114,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("cancellation during launch leaves no untracked child", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const controller = new AbortController();
       setTimeout(() => controller.abort(), 20);
       await assert.rejects(jobs.start(request({ name: "launch-cancel" }), controller.signal), /cancelled/);
@@ -142,7 +142,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("jobs survive the launching process exiting", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const script = `
         import { AgentJobs } from ${JSON.stringify(resolve(here, "../shared/agent-jobs/jobs.ts"))};
         const jobs = new AgentJobs({ root: ${JSON.stringify(join(root, "state"))}, supervisor: ${JSON.stringify(supervisor)} });
@@ -158,7 +158,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("a crashed supervisor is reconciled: unknown while the child runs, then cancellable", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await jobs.start(request());
       process.kill(receipt.status.supervisor!.pid, "SIGKILL");
       const orphaned = await until(() => jobs.inspect(receipt.id), (job) => job?.liveness === "unknown");
@@ -170,7 +170,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("a crashed supervisor with no surviving child is interrupted", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await jobs.start(request());
       process.kill(receipt.status.supervisor!.pid, "SIGKILL");
       process.kill(-receipt.status.child!.pid, "SIGKILL");
@@ -184,7 +184,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("SIGTERM to the supervisor stops the child and records interrupted", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
+      process.env.AGENT_TASK_TEST_CASE = "hang";
       const receipt = await jobs.start(request());
       process.kill(receipt.status.supervisor!.pid, "SIGTERM");
       const [done] = await jobs.wait([receipt.id], 15_000);
@@ -193,7 +193,7 @@ test("detached supervisor runs background jobs independently of the launching pr
     });
 
     await t.test("Claude backend runs through the supervisor", async () => {
-      process.env.ONESHOT_TEST_CASE = "success";
+      process.env.AGENT_TASK_TEST_CASE = "success";
       const receipt = await jobs.start(request({ agent: "claude", model: "sonnet", provider: undefined, effort: "high" }));
       const [done] = await jobs.wait([receipt.id], 15_000);
       assert.equal(done.status.state, "succeeded");
@@ -204,10 +204,10 @@ test("detached supervisor runs background jobs independently of the launching pr
     await t.test("directories without job metadata are ignored", async () => {
       await mkdir(join(jobs.root, "jobs", "job-aaaaaaaaaaaa"), { recursive: true });
       await mkdir(join(jobs.root, "jobs", "not-a-job"), { recursive: true });
-      await mkdir(join(jobs.root, "oneshot-legacy", "x.123"), { recursive: true });
+      await mkdir(join(jobs.root, "task-legacy", "x.123"), { recursive: true });
       const ids = (await new AgentJobs({ root: jobs.root }).list()).map((job) => job.id);
       assert.ok(!ids.includes("job-aaaaaaaaaaaa"));
-      assert.equal(await new AgentJobs({ root: jobs.root }).inspect("../oneshot-legacy"), undefined);
+      assert.equal(await new AgentJobs({ root: jobs.root }).inspect("../task-legacy"), undefined);
     });
 
     await t.test("retention prunes only old delivered/acknowledged terminal jobs", async () => {
