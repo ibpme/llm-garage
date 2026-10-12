@@ -298,8 +298,9 @@ export class AgentJobs {
     // Never signal a PID that another process now owns.
     if (!child || await identityState(child, this.runner) === "reused") return;
     const kill = (signal: NodeJS.Signals) => {
+      // macOS reports EPERM, not ESRCH, for a group whose members have all exited but are not yet reaped.
       try { process.kill(-child.pid, signal); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+      catch (error) { if (!["ESRCH", "EPERM"].includes((error as NodeJS.ErrnoException).code!)) throw error; }
     };
     kill("SIGTERM");
     await sleep(500);

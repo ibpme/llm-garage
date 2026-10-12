@@ -80,8 +80,9 @@ async function stopJob(jobDir: string): Promise<void> {
   if (!Number.isInteger(pid) || pid <= 1) return;
   // The launcher creates a detached process group; kill tools as well as Pi.
   const kill = (signal: NodeJS.Signals) => {
+    // macOS reports EPERM, not ESRCH, for a group whose members have all exited but are not yet reaped.
     try { process.kill(-pid, signal); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    catch (error) { if (!["ESRCH", "EPERM"].includes((error as NodeJS.ErrnoException).code!)) throw error; }
   };
   kill("SIGTERM");
   await sleep(500);
