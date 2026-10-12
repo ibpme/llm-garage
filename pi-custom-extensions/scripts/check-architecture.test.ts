@@ -8,14 +8,14 @@ import { test } from "node:test";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-function check(files: Record<string, string>) {
+function check(files: Record<string, string>, standaloneEntryPoints?: string[]) {
   const directory = mkdtempSync(join(tmpdir(), "pi-architecture-"));
   try {
     mkdirSync(join(directory, "scripts"));
     copyFileSync(join(root, "scripts/check-architecture.mjs"), join(directory, "scripts/check-architecture.mjs"));
     symlinkSync(join(root, "node_modules"), join(directory, "node_modules"), "dir");
     writeFileSync(join(directory, "package.json"), JSON.stringify({
-      type: "module", pi: { extensions: ["./entry.ts"] },
+      type: "module", pi: { extensions: ["./entry.ts"] }, standaloneEntryPoints,
     }));
     writeFileSync(join(directory, "entry.ts"), "export default function extension() {}\n");
     for (const [name, source] of Object.entries(files)) writeFileSync(join(directory, name), source);
@@ -57,4 +57,21 @@ test("architecture rejects undeclared default factories", () => {
   const result = check({ "helper.ts": "export default function hiddenExtension() {}" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /default factories belong only in manifest entry points/);
+});
+
+test("standalone entry points may not load packages at runtime, even transitively", () => {
+  const rejected = check({
+    "worker.ts": 'import "./helper.ts";\nconsole.log(1);\n',
+    "helper.ts": 'import { Text } from "@earendil-works/pi-tui";\nexport const text = Text;\n',
+  }, ["./worker.ts"]);
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /runs outside Pi but loads "@earendil-works\/pi-tui".*worker\.ts -> helper\.ts/);
+  // Node keeps inline-type-only imports as side-effect imports.
+  const inline = check({ "worker.ts": 'import { type Theme } from "@earendil-works/pi-coding-agent";\nexport const value: Theme | 1 = 1;\n' }, ["./worker.ts"]);
+  assert.notEqual(inline.status, 0);
+  assert.match(inline.stderr, /loads "@earendil-works\/pi-coding-agent"/);
+  const allowed = check({
+    "worker.ts": 'import type { Text } from "@earendil-works/pi-tui";\nexport type { Theme } from "@earendil-works/pi-coding-agent";\nimport { join } from "node:path";\nexport const value: Text | string = join("a");\n',
+  }, ["./worker.ts"]);
+  assert.equal(allowed.status, 0, allowed.stderr);
 });

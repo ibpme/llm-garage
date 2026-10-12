@@ -1,26 +1,7 @@
-import { execFile } from "node:child_process";
 import { basename } from "node:path";
-import { promisify } from "node:util";
+import { isDescendant, listProcesses, parseProcesses, run, type ProcessInfo, type Runner } from "../shared/process-identity.ts";
 
-const execFileAsync = promisify(execFile);
-export type Runner = (command: string, args: string[]) => Promise<string>;
-export const run: Runner = async (command, args) => {
-  const { stdout } = await execFileAsync(command, args, {
-    encoding: "utf8",
-    timeout: 5_000,
-    maxBuffer: 8 * 1024 * 1024,
-    env: { ...process.env, LC_ALL: "C" },
-  });
-  return stdout;
-};
-
-export interface ProcessInfo {
-  pid: number;
-  ppid: number;
-  startedAt: string;
-  command: string;
-  args: string;
-}
+export { isDescendant, listProcesses, parseProcesses, run, type ProcessInfo, type Runner };
 
 export interface Pane {
   sessionId: string;
@@ -63,19 +44,6 @@ const PANE_FORMAT = [
   "#{pane_id}", "#{pane_pid}", "#{pane_current_path}",
 ].join("\t");
 
-export function parseProcesses(output: string): Map<number, ProcessInfo> {
-  const processes = new Map<number, ProcessInfo>();
-  for (const line of output.split("\n")) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(\S+)\s*(.*)$/);
-    if (!match) continue;
-    const [, pid, ppid, startedAt, command, args] = match;
-    processes.set(Number(pid), {
-      pid: Number(pid), ppid: Number(ppid), startedAt: startedAt.replace(/\s+/g, " "), command, args,
-    });
-  }
-  return processes;
-}
-
 export function isPi(info: ProcessInfo): boolean {
   const command = basename(info.command);
   if (command === "pi") return true;
@@ -83,16 +51,6 @@ export function isPi(info: ProcessInfo): boolean {
   const entrypoint = info.args.trim().split(/\s+/)[1];
   return !!entrypoint && (basename(entrypoint) === "pi" ||
     /\/pi-coding-agent\/(?:dist\/(?:bundle\/)?cli\.js|src\/cli\.ts)$/.test(entrypoint));
-}
-
-export function isDescendant(pid: number, root: number, processes: Map<number, ProcessInfo>): boolean {
-  const seen = new Set<number>();
-  while (pid > 0 && !seen.has(pid)) {
-    if (pid === root) return true;
-    seen.add(pid);
-    pid = processes.get(pid)?.ppid ?? 0;
-  }
-  return false;
 }
 
 export function parsePanes(output: string): Pane[] {
@@ -110,12 +68,13 @@ export function findAgents(panes: Pane[], processes: Map<number, ProcessInfo>): 
     .map((info) => ({ provider: "pi" as const, interactive: isInteractive(info), pane, process: info })));
 }
 
+export async function listPanes(socket: string, runner: Runner = run): Promise<Pane[]> {
+  return parsePanes(await runner("tmux", ["-S", socket, "list-panes", "-a", "-F", PANE_FORMAT]));
+}
+
 export async function snapshot(socket: string, runner: Runner = run): Promise<{ panes: Pane[]; processes: Map<number, ProcessInfo> }> {
-  const [panes, processes] = await Promise.all([
-    runner("tmux", ["-S", socket, "list-panes", "-a", "-F", PANE_FORMAT]),
-    runner("ps", ["-axo", "pid=,ppid=,lstart=,comm=,args="]),
-  ]);
-  return { panes: parsePanes(panes), processes: parseProcesses(processes) };
+  const [panes, processes] = await Promise.all([listPanes(socket, runner), listProcesses(runner)]);
+  return { panes, processes };
 }
 
 export async function act(

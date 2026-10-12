@@ -1,11 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { ContextWindowTable } from "../shared/agent-jobs/store.ts";
 
 export type ContextWindowResolver = (provider: string, model: string) => number | undefined;
 
 interface ModelLookup {
   find(provider: string, modelId: string): { contextWindow?: number } | undefined;
+}
+
+interface ModelCatalog {
+  getAll(): { provider: string; id: string }[];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -42,4 +47,20 @@ export async function contextWindowResolver(catalog: ModelLookup, path = join(ge
     const window = catalog.find(provider, model)?.contextWindow;
     return window !== undefined && Number.isFinite(window) && window > 0 ? window : undefined;
   };
+}
+
+/**
+ * Verified capacities a supervised Pi child may report, for contextWindowLookup. Limited to one
+ * model ID (without a `:level` suffix) when given; unknown models are left out.
+ */
+export function contextWindowTable(catalog: ModelCatalog | undefined, resolve: ContextWindowResolver, model?: string): ContextWindowTable {
+  const id = model?.replace(/:(off|minimal|low|medium|high|xhigh|max)$/, "");
+  let models: { provider: string; id: string }[];
+  try { models = catalog?.getAll() ?? []; }
+  catch { return []; }
+  return models.flatMap((entry) => {
+    if (id !== undefined && entry.id !== id) return [];
+    const window = resolve(entry.provider, entry.id);
+    return window === undefined ? [] : [[entry.provider, entry.id, window] as [string, string, number]];
+  });
 }

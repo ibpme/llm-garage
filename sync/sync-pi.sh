@@ -19,13 +19,15 @@ uv run "$DIR/config_merge.py" json-set "$TARGET/settings.json" skills '["~/.clau
 link_pi_extensions "$REPO_ROOT/pi-custom-extensions" "$TARGET/extensions"
 
 # Install mutable extension defaults once. Unlike extensions and keybindings,
-# this must be a normal file: the extension updates it when the user toggles
-# suggestions, and that runtime preference should not modify this repository.
-SUGGESTIONS_CONFIG="$TARGET/prompt-suggestions.json"
-if [ ! -e "$SUGGESTIONS_CONFIG" ] && [ ! -L "$SUGGESTIONS_CONFIG" ]; then
-  cp "$REPO_ROOT/pi-custom-config/prompt-suggestions.json" "$SUGGESTIONS_CONFIG"
-  echo "installed default $SUGGESTIONS_CONFIG"
-fi
+# these must be normal files: they hold local preferences (prompt suggestions
+# are toggled at runtime; one-shot subagent modes are edited by hand) that
+# should not modify this repository or be overwritten by a later sync.
+for config in prompt-suggestions.json oneshot-subagent.json; do
+  if [ ! -e "$TARGET/$config" ] && [ ! -L "$TARGET/$config" ]; then
+    cp "$REPO_ROOT/pi-custom-config/$config" "$TARGET/$config"
+    echo "installed default $TARGET/$config"
+  fi
+done
 
 # Symlink this repo's keybindings.json override (unlike extensions, pi reads
 # this as a single whole file, not a directory of entries).

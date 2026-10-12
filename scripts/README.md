@@ -173,9 +173,9 @@ leaf tool policy is not process isolation. See the
 for details.
 
 The [one-shot subagent extension](../pi-custom-extensions/oneshot-subagent/README.md)
-wraps this launcher with final-answer extraction, cancellation, timeouts, and
-root/leaf delegation guards. Those are extension features, not guarantees of
-the raw script. The [`/agents` extension](../pi-custom-extensions/agents/README.md)
+wraps this launcher with a detached per-job supervisor, final-answer extraction,
+cancellation, timeouts, foreground/background waiting and root/leaf delegation
+guards. Those are extension features, not guarantees of the raw script. The [`/agents` extension](../pi-custom-extensions/agents/README.md)
 can discover running jobs; it displays JSON jobs as read-only entries. The raw
 launcher now uses tmux for JSON jobs too, but their output remains in job files
 rather than in the pane.

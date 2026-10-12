@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderRun, stats } from "./rendering.ts";
+import { keyLabel, renderRun, stats } from "./rendering.ts";
 import type { RunDetails } from "./events.ts";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
@@ -137,4 +137,17 @@ for (const expanded of [false, true]) test(`context segment with verified capaci
     component.invalidate();
   }
   assert.match(component.render(200).join("\n"), /context 1.2M \/ 1M · 123%/);
+});
+
+test("running foreground runs show the send-to-background hint once accepted, and only then", () => {
+  assert.equal(keyLabel("shift+up"), "Shift+↑");
+  assert.equal(keyLabel("ctrl+alt+b"), "Ctrl+Alt+B");
+  const base: RunDetails = { name: "review", task: "Review", cwd: "/tmp", status: "running", activity: [], preview: "",
+    turns: 0, toolCalls: 0, durationMs: 0, jobDir: "/tmp/job" };
+  const text = (details: RunDetails, hint?: string) => renderRun(details, false, theme, hint).render(120).join("\n");
+  assert.match(text(base, "Shift+↑"), /Shift\+↑ or \/agents → b: send to background/);
+  assert.doesNotMatch(text({ ...base, jobDir: undefined }, "Shift+↑"), /send to background/, "not before the launch is acknowledged");
+  assert.doesNotMatch(text({ ...base, status: "success", result: "done" }, "Shift+↑"), /send to background/);
+  assert.doesNotMatch(text(base), /send to background/, "no hint when the shortcut is disabled");
+  for (const width of [1, 10, 40]) assert.ok(renderRun(base, false, theme, "Shift+↑").render(width).every((line) => visibleWidth(line) <= width));
 });

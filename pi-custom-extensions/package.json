@@ -18,6 +18,9 @@
     "typebox": "1.3.17",
     "typescript": "5.9.3"
   },
+  "standaloneEntryPoints": [
+    "./oneshot-subagent/supervisor.ts"
+  ],
   "pi": {
     "extensions": [
       "./agents/index.ts",

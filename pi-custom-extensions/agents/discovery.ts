@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readClaudeModel, readStatus } from "./registry.ts";
-import { isDescendant, isInteractive, isPi, run, snapshot, type Agent, type Runner } from "./tmux.ts";
+import { isDescendant, isInteractive, isPi, listPanes, listProcesses, run, type Agent, type ProcessInfo, type Runner } from "./tmux.ts";
 
 interface ClaudeSession {
   pid: number;
@@ -31,10 +31,10 @@ export function parseClaudeSessions(output: string): ClaudeSession[] {
   return [...sessions.values()];
 }
 
-export type Discovery = Agent[] & { warning?: string };
+export type Discovery = Agent[] & { warning?: string; processes?: Map<number, ProcessInfo> };
 
 export async function discover(
-  socket: string, runner: Runner = run, directory = join(getAgentDir(), "agents-live"),
+  socket: string | undefined, runner: Runner = run, directory = join(getAgentDir(), "agents-live"),
 ): Promise<Discovery> {
   // Read Claude first so the subsequent process snapshot cannot include the discovery CLI itself.
   let claude: ClaudeSession[] = [];
@@ -46,8 +46,9 @@ export async function discover(
       warning = `Claude discovery unavailable: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
-  const { panes, processes } = await snapshot(socket, runner);
+  const [panes, processes] = await Promise.all([socket ? listPanes(socket, runner) : [], listProcesses(runner)]);
   const agents: Discovery = [];
+  agents.processes = processes;
   for (const info of processes.values()) {
     if (!isPi(info)) continue;
     const status = readStatus(directory, info);

@@ -1,10 +1,18 @@
-# `/agents`: Pi and Claude Code processes
+# `/agents`: subagent jobs and Pi/Claude Code processes
 
-Browse live Pi and Claude Code processes. Pi discovery uses a fresh `ps` snapshot;
-Claude discovery uses `claude agents --json`, then matches live PIDs in that
-snapshot. Process ancestry maps both providers to tmux panes, including processes
-behind wrapper shells and panes in detached sessions. Saved transcripts and
-`pane_current_command` are not used to establish liveness.
+Browse one-shot subagent jobs and live Pi and Claude Code processes. Pi discovery
+uses a fresh `ps` snapshot; Claude discovery uses `claude agents --json`, then
+matches live PIDs in that snapshot. Both work without tmux. Inside tmux, process
+ancestry also maps processes to panes, including processes behind wrapper shells
+and panes in detached sessions. Saved transcripts and `pane_current_command` are
+not used to establish liveness.
+
+Jobs come from the durable job store (`shared/agent-jobs`), are loaded without
+waiting for process or tmux discovery, and show their own recorded state. Running
+foreground jobs are labeled `foreground`, or `foreground (detached)` when no
+foreground wait in this Pi process is attached to them (for example after the
+launching Pi crashed). Job headers show the latest completed call's tokens and
+context capacity, like the tool display; cumulative totals are not shown.
 
 ## Load
 
@@ -23,18 +31,34 @@ pi -e ./pi-custom-extensions/agents/index.ts
 
 ## Controls
 
-Start Pi inside tmux and run `/agents`.
+Run `/agents` in any Pi TUI. tmux is only needed for pane actions.
+
+List view:
 
 | Key | Action |
 |---|---|
-| Up/Down or `j`/`k` | Navigate |
-| Enter | Switch the existing tmux client to the selected session, window and pane |
+| Up/Down or `j`/`k`, PageUp/PageDown, Home/End | Navigate |
+| Tab / Shift+Tab | Cycle filters: **This session** (default: jobs started by this Pi session, followed by live processes), **All live** (running jobs of any session and all live processes), **Recent jobs** (up to 100, newest first) |
+| Enter | Job or headless process: open details. Interactive tmux pane: switch the existing tmux client to its session, window and pane |
+| `c` | Cancel the selected job after an inline `[y/n]` confirmation naming it (owned, unfinished jobs only) |
+| `a` | Acknowledge the selected finished job (owned only). This clears it from this session's indicator and does not notify the model |
+| `b` | Send the selected foreground job to the background: its tool call returns a receipt and the same child keeps running. Only for running jobs of this session whose foreground wait is attached in this Pi; the same transition as the one-shot shortcut. Opening or closing the modal never changes a job's waiting mode |
 | Shift+V (`V`) | Move the selected pane into the invoking window, above/below the invoking pane (`join-pane -v`) |
 | Shift+H (`H`) or Shift+Enter | Move the selected pane into the invoking window, left/right of the invoking pane (`join-pane -h`) |
-| Ctrl+X | Kill the selected agent's entire tmux pane (the current pane is protected) |
-| PageUp / PageDown | Browse the read-only Non-interactive section when it has multiple pages |
+| Ctrl+X | Kill the selected agent's entire tmux pane (the current pane is protected; never offered for jobs) |
 | `r` | Refresh immediately |
 | Escape, Ctrl+C or `q` | Close |
+
+Detail view (replaces the list inside the same modal; refreshes every second):
+
+| Key | Action |
+|---|---|
+| Tab / Shift+Tab | Cycle **Activity**, **Result**, **Task** (jobs) |
+| Up/Down or `j`/`k`, PageUp/PageDown, Home/End | Scroll. At the bottom the view follows new activity; scrolling up stops following and shows "new activity — End to follow" |
+| `b` / `c` / `a` | Send to background / cancel / acknowledge, as in the list |
+| Escape, Ctrl+C or `q` | Back to the list with selection and scroll preserved |
+
+Pane actions outside tmux, or on rows without a pane, show a "require tmux" error.
 
 The viewer opens immediately as a centered, focused floating modal over the
 existing TUI. It shows **Discovering agents…** while process discovery runs in
@@ -49,16 +73,31 @@ adapt on resize, and the modal stays the same size during refreshes and kill
 confirmations. Shift+Enter requires tmux to forward modified
 keys (see Pi's tmux setup docs); Shift+H remains available as an alternative.
 
-The list refreshes every two seconds and preserves selection. It shows provider,
-status, pane location, PID, current-pane marker, and available session name,
-working directory, model and waiting reason.
+Process discovery refreshes every two seconds and job state every second; selection
+is preserved. Rows show provider or job name, state, pane location, PID,
+current-pane marker, and available session name, working directory, model and
+waiting reason. Job rows show state (with "supervisor lost" when the supervisor
+died but the child still runs), elapsed time, quiet time for running jobs, and
+whether another session owns them.
 
-Only interactive agents mapped to a pane on the current tmux server are selectable.
-A separate **Non-interactive** section displays headless/print/RPC/JSON processes,
-Claude background processes, and interactive processes without a pane on this
-server. These rows cannot be selected, attached, split or killed. PageUp/PageDown browse
-this section without changing the interactive selection. Claude entries without
-a live PID, including persisted jobs whose processes exited, are not shown.
+Every row is selectable; its capabilities decide the actions:
+
+- **Owned job**: details (activity timeline, result, task and metadata), cancel,
+  acknowledge. **Other session's job**: details only.
+- **Interactive process in a tmux pane**: attach, split, kill (as before). Its
+  details are available outside tmux too, minus the pane.
+- **Unmanaged headless process** (print/RPC/JSON, Claude background, no pane):
+  process metadata only; no log or control access.
+
+A live process that descends from a running job's verified child process-group
+leader (PID and start time both match) is shown as the job, not as a separate row.
+A stored job record never makes a process look alive: liveness comes from the job
+reconciliation, and processes only come from the live `ps` snapshot.
+
+Opening or viewing a job writes nothing. The Result section renders the final
+answer as Markdown (first 256 KiB, with a truncation notice) or, while running,
+a "partial preview". The Task section shows the task and metadata (cwd, owner
+session, job directory, result path, PIDs, terminal reason, stderr tail).
 
 Splitting **moves the entire existing pane**; it does not restart or
 clone the agent. If that was the last pane in its source window, tmux removes the empty
@@ -226,7 +265,7 @@ capture remains a possible follow-up, not a current dependency.
 
 ## Scope and limitations
 
-- macOS/Linux, interactive Pi, and tmux are required.
+- macOS/Linux and interactive Pi are required; tmux is only needed for pane actions.
 - Only the server identified by the invoking process's `TMUX` variable is scanned
   for panes. Processes elsewhere are displayed read-only, even if they belong to
   another tmux server.

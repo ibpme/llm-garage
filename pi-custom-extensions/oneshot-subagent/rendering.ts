@@ -37,7 +37,14 @@ function statsLine(details: RunDetails, theme: Theme): string {
   return segments(details).map((segment) => theme.fg(segment.tone ?? "dim", segment.text)).join(theme.fg("dim", " · "));
 }
 
-export function renderRun(details: RunDetails, expanded: boolean, theme: Theme): Component {
+/** Formats a Pi key ID for display, e.g. `shift+up` as `Shift+↑`. */
+export function keyLabel(key: string): string {
+  const arrows: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→" };
+  return key.split("+").map((part) => arrows[part] ?? part.charAt(0).toUpperCase() + part.slice(1)).join("+");
+}
+
+/** backgroundHint: shortcut label shown while an accepted foreground run can be sent to the background. */
+export function renderRun(details: RunDetails, expanded: boolean, theme: Theme, backgroundHint?: string): Component {
   const running = details.status === "running";
   const tone = details.status === "success" ? "success" : details.status === "error" ? "error" : "warning";
   const icon = running ? "◌" : details.status === "success" ? "✓" : details.status === "aborted" ? "■" : "✗";
@@ -67,6 +74,9 @@ export function renderRun(details: RunDetails, expanded: boolean, theme: Theme):
   if ((Array.isArray(details.children) && details.children.length) || details.childrenOmitted)
     children.push(new Text(theme.fg("dim", "nested runs: see job logs"), 0, 0));
   if (expanded && details.jobDir) children.push(new Text(theme.fg("dim", `logs: ${details.jobDir}`), 0, 0));
+  // jobDir is set once the launch is acknowledged, which is when the run becomes eligible.
+  if (running && backgroundHint && details.jobDir)
+    children.push(new Text(theme.fg("dim", `${backgroundHint} or /agents → b: send to background`), 0, 0));
   if (!expanded && !running) children.push(new Text(theme.fg("dim", "Expand for the full response and job files"), 0, 0));
   return {
     render(width) {

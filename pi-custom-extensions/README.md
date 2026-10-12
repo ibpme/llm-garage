@@ -42,7 +42,7 @@ larger features use focused modules:
 | Feature | Responsibilities |
 |---|---|
 | `agents/` | Process/tmux discovery, registry metadata, endpoint diagnostics, picker |
-| `oneshot-subagent/` | One-shot Pi/Claude delegation, JSON event tracking, process lifecycle, tool rendering |
+| `oneshot-subagent/` | One-shot Pi/Claude delegation, background job tools/indicator/notices, detached supervisor, JSON event tracking, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
 | `questionnaire/` | Registration/reanswer workflow, model parsing, schemas, UI, tree compatibility |
 | `ssh/` | Registration/connection lifecycle, operations, transport, tool-set integration |
@@ -66,6 +66,8 @@ Important runtime relationships that a static import tree cannot show:
 | Reasoning tokens feed agent statistics | Event name/payload in `contracts/events.ts` |
 | Footer positions mode and SSH badges | Keys in `contracts/status-keys.ts` |
 | Claude status-line wrapper supplies agent metadata | Registry files read by `agents/registry.ts` |
+| Subagent jobs are shared by delegation and `/agents` | Durable records via `shared/agent-jobs/`; attached foreground waits via the process-wide `shared/agent-jobs/foreground.ts` service |
+| The detached job supervisor runs in plain Node, outside Pi | `oneshot-subagent/supervisor.ts`, listed in `standaloneEntryPoints`; no package runtime imports |
 
 Tool-set is the sole owner of active-tool application. Its blocked-tool additions
 are instance-owned and survive session resets for that runtime. SSH integration
@@ -122,9 +124,13 @@ status; Claude supplies its status through `claude agents --json`.
 
 [`oneshot-subagent/`](oneshot-subagent/README.md) adds `oneshot_subagent` for
 self-contained delegation to a fresh Pi or Claude Code process via `scripts/agent-spawn.sh`
-in JSON mode. The task and live tool activity render in the transcript; the
-child's final answer and usage return to the main agent. Cancellation, timeout,
-and shutdown stop its owned process tree. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
+in JSON mode. Every delegation runs under a detached supervisor. Foreground calls
+(the shipped default, configurable in `oneshot-subagent.json`) wait for the
+answer, and cancellation or shutdown stops them; Shift+↑ or `/agents` sends a
+running one to the background. Background jobs survive reloads and Pi exit; the
+main agent gets a job receipt, keeps working, and retrieves answers and usage with
+`subagent_jobs`. An indicator above the editor and short completion notices track
+outstanding jobs, and `/agents` inspects or cancels them. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
 and MCP/native subagents disabled. Only the main session can delegate: one-shot
 children never register the tool, and a session entry keeps that role across
 reloads, resumes, and forks. Calls do not share conversation

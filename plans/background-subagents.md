@@ -1,6 +1,10 @@
 # Background one-shot subagents
 
-Status: implementation plan; background execution is not implemented yet.
+Status: design reference. Its implementation sequence and unconditional
+background default are superseded by
+[oneshot-prototype-integration.md](oneshot-prototype-integration.md), which
+integrated the prototype with a configurable default (foreground as shipped) and
+foreground-to-background switching. Exit confirmation remains a follow-up.
 Builds on the leaf-only change (commit f88f251): only root sessions delegate, and
 every child is a leaf, so each background job is a single process group with no
 descendants.

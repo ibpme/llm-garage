@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CHILD_NOTICE, runSubagent, type RunOptions } from "./runner.ts";
+import { installFakeAgents, stopFakeAgents } from "./fake-agents.fixture.ts";
 
 const launcher = resolve(dirname(fileURLToPath(import.meta.url)), "../../scripts/agent-spawn.sh");
 
@@ -20,52 +21,8 @@ async function assertGroupStopped(pid: number): Promise<void> {
 
 test("real agent-spawn JSON launcher with fake Pi/Claude: results, failures, cancellation and timeout", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "oneshot-test-"));
-  const bin = join(root, "bin");
-  await mkdir(bin);
+  const bin = await installFakeAgents(root);
   const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
-  const shell = '#!/bin/bash\nif [[ ${1:-} == -lic ]]; then shift 3; exec "$@"; fi\nexec /bin/bash "$@"\n';
-  for (const name of ["bash", "zsh"]) await writeFile(join(bin, name), shell, { mode: 0o755 });
-  await writeFile(join(bin, "pi"), `#!${process.execPath}
-const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD, cwd: process.cwd() }));
-const mode = process.env.ONESHOT_TEST_CASE;
-if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
-else {
-  const usage = { input: 7, output: 3, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 } };
-  const output = mode === 'large' ? 'x'.repeat(50000) : 'Final 😀 answer';
-  const events = [
-    { type: 'session', id: 'test' },
-    { type: 'tool_execution_start', toolName: 'read', args: { path: 'file.ts' } },
-    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Final 😀' } },
-    { type: 'message_end', message: { role: 'assistant', provider: 'fake-provider', model: 'fake-model', content: [{ type: 'text', text: output }], usage, stopReason: mode === 'error' ? 'error' : 'stop', errorMessage: mode === 'error' ? 'provider failed' : undefined } },
-    { type: 'agent_settled', aborted: false },
-  ];
-  const buffer = Buffer.from(events.map(e => JSON.stringify(e)).join('\\n') + '\\n');
-  const split = buffer.indexOf(Buffer.from('😀')) + 1;
-  fs.writeSync(1, buffer.subarray(0, split));
-  setTimeout(() => { fs.writeSync(1, buffer.subarray(split)); if (mode === 'exit') process.exitCode = 7; }, 300);
-}
-`, { mode: 0o755 });
-  await writeFile(join(bin, "claude"), `#!${process.execPath}
-const fs = require('node:fs');
-fs.writeFileSync(${JSON.stringify(join(root, "args.json"))}, JSON.stringify({ args: process.argv.slice(2), child: process.env.PI_ONESHOT_SUBAGENT_CHILD }));
-const mode = process.env.ONESHOT_TEST_CASE;
-if (mode === 'hang') { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
-else {
-  const events = [
-    { type: 'system', subtype: 'init', model: 'claude-model' },
-    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Live 😀' } } },
-    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: 'file.ts' } }] } },
-  ];
-  if (mode !== 'missing-result') events.push({ type: 'result', subtype: mode === 'error' ? 'error_during_execution' : 'success',
-    is_error: mode === 'error', errors: mode === 'error' ? ['Claude provider failed'] : [], result: mode === 'large' ? 'x'.repeat(50000) : 'Claude final 😀 answer',
-    num_turns: 2, total_cost_usd: 0.02, usage: { input_tokens: 7, output_tokens: 3 } });
-  const buffer = Buffer.from(events.map(e => JSON.stringify(e)).join('\\n') + '\\n');
-  const split = buffer.lastIndexOf(Buffer.from('😀')) + 1;
-  fs.writeSync(1, buffer.subarray(0, split));
-  setTimeout(() => { fs.writeSync(1, buffer.subarray(split)); if (mode === 'exit') process.exitCode = 7; }, 1200);
-}
-`, { mode: 0o755 });
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const updates: string[] = [];
   const options = (overrides: Partial<RunOptions> = {}): RunOptions => ({
@@ -85,7 +42,7 @@ else {
       assert.ok(updates.length > 0);
       const captured = JSON.parse(await readFile(join(root, "args.json"), "utf8"));
       assert.equal(captured.child, "1");
-      assert.deepEqual(captured.args, ["--mode", "json", "--model", "model-id", "--provider", "provider", "--thinking", "high", "--", CHILD_NOTICE + options().task]);
+      assert.deepEqual(captured.args, ["--mode", "json", "--no-session", "--model", "model-id", "--provider", "provider", "--thinking", "high", "--", CHILD_NOTICE + options().task]);
       assert.equal(outcome.details.task, options().task);
       assert.deepEqual(await readdir(dirname(outcome.details.jobDir!)), [outcome.details.jobDir!.split("/").at(-1)], "one job directory and no run markers or children");
       assert.equal((await stat(outcome.details.jobDir!)).mode & 0o777, 0o700);
@@ -198,6 +155,7 @@ else {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
+    await stopFakeAgents(root);
     await rm(root, { recursive: true, force: true });
   }
 });
