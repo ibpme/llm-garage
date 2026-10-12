@@ -19,7 +19,7 @@ test("isolated tmux server: discover, switch client, and move panes in both dire
 
   const directory = mkdtempSync(join(tmpdir(), "pi-agents-integration-"));
   const socket = join(directory, "socket");
-  const tmux = (args: string[]) => run("tmux", ["-S", socket, "-f", "/dev/null", ...args]);
+  const tmux = (args: string[]) => run("tmux", ["-S", socket, "-u", "-f", "/dev/null", ...args]);
   const fixture = join(directory, "pi-fixture.cjs");
   writeFileSync(fixture, 'process.title = "pi"; setInterval(() => {}, 60000);\n');
   let client: ReturnType<typeof spawn> | undefined;

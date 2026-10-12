@@ -69,7 +69,8 @@ export function findAgents(panes: Pane[], processes: Map<number, ProcessInfo>): 
 }
 
 export async function listPanes(socket: string, runner: Runner = run): Promise<Pane[]> {
-  return parsePanes(await runner("tmux", ["-S", socket, "list-panes", "-a", "-F", PANE_FORMAT]));
+  // -u: run() forces LC_ALL=C, and in a non-UTF-8 locale tmux 3.6+ prints the tab separators as "_".
+  return parsePanes(await runner("tmux", ["-S", socket, "-u", "list-panes", "-a", "-F", PANE_FORMAT]));
 }
 
 export async function snapshot(socket: string, runner: Runner = run): Promise<{ panes: Pane[]; processes: Map<number, ProcessInfo> }> {
@@ -106,7 +107,7 @@ export async function act(
   }
 
   const originSession = (await tmux(["display-message", "-p", "-t", originPane, "#{session_id}"])).trim();
-  const clients = (await tmux(["list-clients", "-F", "#{client_name}\t#{session_id}\t#{client_activity}"]))
+  const clients = (await tmux(["-u", "list-clients", "-F", "#{client_name}\t#{session_id}\t#{client_activity}"]))
     .trim().split("\n").map((line) => line.split("\t"))
     .filter((client) => client[1] === originSession)
     .sort((a, b) => Number(b[2]) - Number(a[2]));
