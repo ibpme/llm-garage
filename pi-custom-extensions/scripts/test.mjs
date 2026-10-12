@@ -11,7 +11,9 @@ function tests(directory) {
     return entry.isDirectory() ? tests(file) : file.endsWith(".test.ts") ? [file] : [];
   });
 }
-const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test", ...tests(root)], {
+// One file at a time: the agent-task integration tests spawn many processes and
+// time out when files run concurrently; serially the suite takes about as long.
+const result = spawnSync(process.execPath, ["--experimental-strip-types", "--test", "--test-concurrency=1", ...tests(root)], {
   cwd: root,
   stdio: "inherit",
 });

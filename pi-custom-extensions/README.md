@@ -294,6 +294,10 @@ bun run check:architecture   # Entry-point boundaries and runtime import cycles
 bun run test:loading         # Manifest discovery and imports; no model calls
 ```
 
+On some macOS machines the agent-task integration tests time out when launched
+through `bun run` (process launches stall for seconds). Run the suite directly
+with `node scripts/test.mjs` there; it runs test files one at a time.
+
 Tests cover tool selection and SAFE masking, remote integration in both startup
 orders, cross-import services, guards, pure parsing/formatting/accounting, and the
 agent browser. The tmux integration test uses an isolated server and skips when
