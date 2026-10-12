@@ -21,6 +21,9 @@ const scratch = await mkdtemp(join(tmpdir(), "agent-task-index-test-"));
 test.after(() => rm(scratch, { recursive: true, force: true }));
 
 interface Options { configPath?: string; keybindingsPath?: string }
+const foregroundConfig = join(scratch, "foreground-config.json");
+await writeFile(foregroundConfig, JSON.stringify({ defaultMode: "foreground" }));
+const foreground = { configPath: foregroundConfig };
 const missing = () => ({ configPath: join(scratch, "missing-config.json"), keybindingsPath: join(scratch, "missing-keys.json") });
 
 function register(env: Record<string, string> = {}, jobs?: AgentJobs, sessionId = "session-1", options: Options = {}) {
@@ -65,7 +68,7 @@ const ctx = { cwd: "/tmp", model: { id: "parent-model", provider: "parent-provid
 const cancelled = () => { const controller = new AbortController(); controller.abort(); return controller.signal; };
 
 test("root registers the tool at session start, inherits model, and forwards already-aborted signals", async () => {
-  const root = register();
+  const root = register({}, undefined, "session-1", foreground);
   assert.equal(root.tools.length, 0, "role is unknown until the session is read");
   await root.start();
   assert.deepEqual(root.tools.map((tool) => tool.name), ["agent_task", "jobs"]);
@@ -75,7 +78,7 @@ test("root registers the tool at session start, inherits model, and forwards alr
   assert.equal(root.tool?.renderShell, "self", "must not use Pi's colored tool shell");
   assert.equal(root.tool?.exposure, "direct");
   assert.doesNotMatch(root.tool!.description, /depth/i);
-  const result = await root.tool!.execute("call", { task: "Review code", mode: "foreground" }, cancelled(), undefined, ctx);
+  const result = await root.tool!.execute("call", { task: "Review code" }, cancelled(), undefined, ctx);
   assert.equal((result.details as RunDetails).model, "parent-model");
   assert.equal((result.details as RunDetails).status, "aborted");
   assert.equal(result.isError, true);
@@ -116,10 +119,10 @@ test("SAFE no longer masks or rejects delegation", async () => {
   const blocked: string[] = [];
   const dispose = publishToolSet({ getMode: () => "safe", addBlockedTools: (names: string[]) => blocked.push(...names) } as unknown as ToolSet);
   try {
-    const instance = await register().start();
+    const instance = await register({}, undefined, "session-1", foreground).start();
     assert.deepEqual(blocked, []);
     for (const agent of ["pi", "claude"] as const) {
-      const result = await instance.tool!.execute("call", { task: "Review", agent, mode: "foreground" }, cancelled(), undefined, ctx);
+      const result = await instance.tool!.execute("call", { task: "Review", agent }, cancelled(), undefined, ctx);
       assert.equal((result.details as RunDetails).status, "aborted");
     }
   } finally { dispose(); }
@@ -132,8 +135,8 @@ test("validates blank task and provider without model before launching", async (
 });
 
 test("Claude ignores provider without model, does not inherit Pi defaults, and validates effort", async () => {
-  const { tool } = await register().start();
-  const result = await tool!.execute("call", { task: "Review", agent: "claude", provider: "ignored", mode: "foreground" }, cancelled(), undefined, ctx);
+  const { tool } = await register({}, undefined, "session-1", foreground).start();
+  const result = await tool!.execute("call", { task: "Review", agent: "claude", provider: "ignored" }, cancelled(), undefined, ctx);
   assert.equal((result.details as RunDetails).agent, "claude");
   assert.equal((result.details as RunDetails).model, undefined);
   await assert.rejects(tool!.execute("call", { task: "Review", agent: "claude", thinking: "off" }, cancelled(), undefined, ctx), /no exact equivalent/);
@@ -186,14 +189,6 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     await t.test("there is no blocking wait action; completion notices wake the model instead", async () => {
       assert.doesNotMatch(JSON.stringify(owner.jobsTool!.parameters), /"wait"/);
       assert.ok(owner.tool!.promptGuidelines!.some((line) => /completion notice arrives .* end your turn instead of polling/.test(line)));
-    });
-
-    await t.test("an explicit foreground mode overrides the background default", async () => {
-      process.env.AGENT_TASK_TEST_CASE = "success";
-      const result = await run(owner, "tool", { task: "Wait for it", name: "fg-explicit", mode: "foreground" });
-      assert.equal((result.details as RunDetails).status, "success");
-      assert.match((result.content[0] as { text: string }).text, /Final 😀 answer/);
-      assert.equal(result.usage?.input, 7);
     });
 
     await t.test("result retrieves a finished answer and reports usage exactly once", async () => {
@@ -274,8 +269,8 @@ test("session_shutdown aborts in-flight foreground runs for every reason", async
   process.env.AGENT_TASK_TEST_CASE = "hang";
   try {
     await Promise.all((["quit", "reload", "new", "resume", "fork"] as const).map(async (reason) => {
-      const instance = await register({}, new AgentJobs({ root: join(root, "state"), supervisor })).start();
-      const pending = instance.tool!.execute("call", { task: "Hang", mode: "foreground", cwd: root }, undefined, undefined,
+      const instance = await register({}, new AgentJobs({ root: join(root, "state"), supervisor }), "session-1", foreground).start();
+      const pending = instance.tool!.execute("call", { task: "Hang", cwd: root }, undefined, undefined,
         instance.context as unknown as ExtensionToolContext);
       await new Promise((resolveWait) => setTimeout(resolveWait, 300));
       await instance.handlers.get("session_shutdown")!({ reason });
@@ -293,8 +288,8 @@ test("session_shutdown aborts in-flight foreground runs for every reason", async
 test("config: missing file uses the background default and the shortcut; disabling it registers no shortcut", async () => {
   const defaults = await register().start();
   assert.deepEqual([...defaults.shortcuts.keys()], ["shift+up"]);
-  assert.match(defaults.tool!.description, /Default mode here: "background"/);
-  assert.match(defaults.tool!.promptSnippet!, /runs in the background by default/);
+  assert.match(defaults.tool!.description, /job receipt/);
+  assert.doesNotMatch(JSON.stringify(defaults.tool!.parameters), /"mode"/, "the configured mode is not model-selectable");
   const configPath = join(scratch, "no-shortcut.json");
   await writeFile(configPath, JSON.stringify({ allowBackgroundShortcut: false }));
   const disabled = await register({}, undefined, "session-1", { configPath }).start();
@@ -414,12 +409,6 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
       assert.equal((await jobs.inspect(job.id))!.status.state, "cancelled");
     });
 
-    await t.test("an explicit background mode overrides the foreground default", async () => {
-      process.env.AGENT_TASK_TEST_CASE = "success";
-      const receipt = await run({ task: "Bg", name: "explicit", mode: "background" });
-      assert.equal((receipt.details as ReceiptDetails).backgrounded, false);
-      assert.match((receipt.content[0] as { text: string }).text, /was accepted and (is|has already finished)/);
-    });
   } finally {
     await owner.handlers.get("session_shutdown")!({ reason: "quit" });
     for (const [key, value] of Object.entries(previous)) {

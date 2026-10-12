@@ -19,7 +19,7 @@ decides what the tool call does meanwhile:
   can send it to the background while it runs; the call then returns a receipt
   and the same child keeps running.
 
-An explicit `mode` always wins; omitting it uses the configured default.
+The mode is fixed by the configured default; the model cannot choose it.
 
 ## Configuration
 
@@ -97,7 +97,6 @@ text(await tools.jobs({ action: "result", job_id: receipt.details.jobId }));
 | `provider` | Pi: parent provider when inheriting the model, otherwise requires explicit `model`; Claude: ignored, even without `model` |
 | `thinking` | Pi: parent level when inheriting the model, otherwise CLI default/suffix; Claude: compatibility alias for `effort` at common levels |
 | `effort` | Optional shared reasoning level: `low`, `medium`, `high`, `xhigh`, `max`; mapped to Pi `--thinking` or Claude `--effort` |
-| `mode` | Configured `defaultMode` (`background` as shipped); `background` returns a receipt now, `foreground` waits for the answer |
 | `timeout_seconds` | 600 in foreground, 1,800 in background, chosen at launch; range 1–3,600 |
 
 Every call is a new session. The child does **not** inherit the parent's transcript:
@@ -153,8 +152,8 @@ by the notice. `completionNotice` selects the delivery:
 | `passive` | Appended at the end of the turn; never starts one | Appended only |
 
 A woken turn is a model call the user did not prompt; choose `passive` to avoid
-that. In `passive` mode the prompt guidelines tell the model to use foreground
-mode when it is blocked on an answer. Notices are sent once, only while the owning session is active
+that. In `passive` mode the prompt guidelines tell the model to check jobs
+with the `jobs` tool. Notices are sent once, only while the owning session is active
 and the branch that launched the job is the current branch; otherwise they wait
 for that session's next start or for the branch to become active again. Batch
 completions are coalesced. Foreground answers are returned by their own tool

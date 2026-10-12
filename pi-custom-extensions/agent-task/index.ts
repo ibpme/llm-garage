@@ -285,45 +285,32 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
       exposure: "direct",
       label: "Agent task",
       renderShell: "self",
-      description: "Delegate a complete, self-contained task to a fresh Pi or Claude Code agent via agent-spawn.sh in JSON mode. " +
-        `Default mode here: "${config.defaultMode}". Mode "foreground" waits and returns the final answer; the user may send it to the background, ` +
-        `in which case the call returns a job receipt instead. Mode "background" returns a job receipt immediately while the child runs independently. ` +
-        `Collect a receipt's answer later with the ${JOBS_TOOL_NAME} tool. ` +
-        "The child has its own tools/configuration and can edit files or run commands. " +
-        "It does not see this conversation and does not resume earlier delegations. Children are leaves and cannot delegate further. " +
-        "Defaults to the current working directory. Pi inherits model/thinking; Claude uses its own defaults. Delegation remains available in SAFE mode.",
-      promptSnippet: `agent_task: delegate a standalone task to a fresh Pi or Claude Code agent; ${foregroundDefault
-        ? "waits for the answer by default" : "runs in the background by default"} (receipts are collected with the ${JOBS_TOOL_NAME} tool)`,
-      promptGuidelines: [
-        "Give agent_task all necessary context, file paths, constraints, and expected deliverables; it cannot see the parent conversation.",
-        `A receipt is not an answer. After one, keep working on independent tasks and retrieve the result with the ${JOBS_TOOL_NAME} tool before relying on it or claiming dependent work is complete.`,
+      description: "Run a task in a fresh Pi or Claude Code agent with its own tools. It cannot see this conversation or delegate. " +
+        (foregroundDefault ? "Waits and returns the agent's answer."
+          : `Returns a job receipt, not an answer; fetch the answer with ${JOBS_TOOL_NAME}.`),
+      promptSnippet: "agent_task: run a standalone task in a fresh agent",
+      promptGuidelines: foregroundDefault ? [] : [
         waking
-          ? `A completion notice arrives as a new message when a background job finishes; if you have nothing else to do, end your turn instead of polling the ${JOBS_TOOL_NAME} tool.`
-          : `Completion notices do not start a turn; use mode "foreground" when you are blocked on the answer.`,
-        foregroundDefault
-          ? 'Pass mode "background" when you have independent work to do while the agent task runs.'
-          : 'Pass mode "foreground" only when you are blocked on the answer.',
-        "Avoid concurrent agents editing the same files, and do not edit files a running background job may change. The child is not a sandbox and has its own tool permissions, but it cannot delegate further.",
+          ? `A completion notice arrives when a job finishes; if nothing else to do, end your turn instead of polling ${JOBS_TOOL_NAME}.`
+          : `Completion notices do not start a turn; check jobs with ${JOBS_TOOL_NAME}.`,
       ],
       annotations: { destructiveHint: true, openWorldHint: true },
       parameters: Type.Object({
-        agent: Type.Optional(StringEnum(["pi", "claude"] as const, { description: "Backend (default pi)" })),
-        task: Type.String({ minLength: 1, description: "Complete standalone task, including context and expected output" }),
-        mode: Type.Optional(StringEnum(["background", "foreground"] as const, {
-          description: `foreground: wait for the final answer; background: return a job receipt now (default ${config.defaultMode})` })),
-        name: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$", maxLength: 64, description: "Short task label shown in the TUI and job files" })),
-        cwd: Type.Optional(Type.String({ description: "Working directory, relative to the main agent's cwd or absolute" })),
-        model: Type.Optional(Type.String({ description: "Backend-specific model ID or alias; model:level supported. Pi inherits the parent; Claude uses its configured default" })),
-        provider: Type.Optional(Type.String({ description: "Pi provider restriction; requires an explicit model for Pi, ignored for Claude" })),
+        agent: Type.Optional(StringEnum(["pi", "claude"] as const, { description: "Default pi" })),
+        task: Type.String({ minLength: 1, description: "Full task with context and expected output" }),
+        name: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$", maxLength: 64, description: "Short label" })),
+        cwd: Type.Optional(Type.String({ description: "Defaults to current cwd" })),
+        model: Type.Optional(Type.String({ description: "Model ID or alias, optionally model:level; defaults to parent (pi) or Claude config" })),
+        provider: Type.Optional(Type.String({ description: "Pi only; requires model" })),
         thinking: Type.Optional(StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const)),
-        effort: Type.Optional(StringEnum(EFFORT_LEVELS, { description: "Shared reasoning level: Pi --thinking / Claude --effort. Alias of thinking for common levels; explicit level overrides model suffix" })),
-        timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3600, description: "Total time limit in seconds, fixed at launch (default 600 in foreground, 1800 in background)" })),
+        effort: Type.Optional(StringEnum(EFFORT_LEVELS, { description: "Reasoning level; overrides model suffix" })),
+        timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3600, description: `Default ${foregroundDefault ? 600 : 1800}` })),
       }),
       async execute(toolCallId, params, signal, onUpdate, ctx): Promise<AgentToolResult<RunDetails | ReceiptDetails>> {
         if (role === "child") throw new Error("Agent tasks cannot delegate");
         if (!params.task.trim()) throw new Error("Task must not be blank");
         const backend = resolveBackend(params, ctx);
-        const mode = params.mode ?? config.defaultMode;
+        const mode = config.defaultMode;
         const name = params.name ?? "agent";
         const initial: RunDetails = { name, task: params.task, cwd: resolve(ctx.cwd, params.cwd ?? "."), agent: backend.agent, model: backend.model,
           status: "running", activity: [], preview: "", turns: 0, toolCalls: 0, durationMs: 0 };
@@ -334,7 +321,7 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
           const active = await jobs.list({ owner, active: true });
           if (active.length >= MAX_ACTIVE_PER_OWNER) {
             throw new Error(`At most ${MAX_ACTIVE_PER_OWNER} background agent task jobs may run at once in this session; active: ` +
-              `${active.map((job) => jobLabel(job)).join(", ")}. Wait for, retrieve or cancel one with the ${JOBS_TOOL_NAME} tool, or use mode "foreground".`);
+              `${active.map((job) => jobLabel(job)).join(", ")}. Wait for, retrieve or cancel one with the ${JOBS_TOOL_NAME} tool.`);
           }
         }
         const cwd = await realpath(initial.cwd);
@@ -349,7 +336,7 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
         }, signal, onUpdate, { ...initial, cwd });
       },
       renderCall(args, theme) {
-        const mode = args.mode ?? config.defaultMode;
+        const mode = config.defaultMode;
         return new Text(
           theme.fg("toolTitle", theme.bold("◆ agent task")) + theme.fg("accent", `  ${oneLine(args.name ?? "agent", 64)}`) + theme.fg("dim", ` · ${args.agent ?? "pi"}`) +
           (args.model ? theme.fg("dim", ` · ${oneLine(args.model, 80)}`) : "") + theme.fg("dim", ` · ${mode}`) +
@@ -375,17 +362,12 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
       name: JOBS_TOOL_NAME,
       exposure: "direct",
       label: "Jobs",
-      description: "Manage agent task jobs launched from this session: list them, check status, retrieve a finished job's answer, " +
-        "or cancel one. Retrieving a running job returns its state, not an error. " +
-        "Failed, timed-out, cancelled and interrupted jobs are returned as errors; their child may have left partial changes.",
-      promptSnippet: `${JOBS_TOOL_NAME}: list, check, retrieve, or cancel background agent task jobs from this session`,
-      promptGuidelines: [
-        `Retrieve a background job's answer with the ${JOBS_TOOL_NAME} tool, action "result", before relying on it, typically after its completion notice.`,
-      ],
+      description: "List, check, fetch the answer of, or cancel agent_task jobs from this session. Failed, timed-out, cancelled and interrupted jobs return errors and may leave partial changes.",
+      promptSnippet: `${JOBS_TOOL_NAME}: list, check, fetch or cancel agent_task jobs`,
       annotations: { openWorldHint: false },
       parameters: Type.Object({
-        action: StringEnum(["list", "status", "result", "cancel"] as const, { description: "list: this session's jobs; status: state only; result: the answer of a finished job; cancel: stop a job" }),
-        job_id: Type.Optional(Type.String({ pattern: "^job-[0-9a-f]{12}$", description: "Job ID from the receipt or completion notice" })),
+        action: StringEnum(["list", "status", "result", "cancel"] as const, { description: "result returns the answer" }),
+        job_id: Type.Optional(Type.String({ pattern: "^job-[0-9a-f]{12}$", description: "Required except for list" })),
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<JobsToolDetails>> {
         if (role === "child") throw new Error("Agent tasks have no background jobs");
