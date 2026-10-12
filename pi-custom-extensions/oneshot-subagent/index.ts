@@ -102,7 +102,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
     if (!warned && warnings.length && ctx.hasUI) ctx.ui.notify(`One-shot subagent config: ${warnings.join("; ")}`, "warning");
     warned = true;
     unpublish ??= publishForegroundWaits(waits);
-    watcher = new JobWatcher(pi, jobs, ctx);
+    watcher = new JobWatcher(pi, jobs, ctx, config.completionNotice);
     watcher.start();
   });
   pi.on("session_shutdown", async () => {
@@ -279,6 +279,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
 
   function registerTools() {
     const foregroundDefault = config.defaultMode === "foreground";
+    const waking = config.completionNotice !== "passive";
     pi.registerTool({
       name: TOOL_NAME,
       exposure: "direct",
@@ -296,6 +297,9 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       promptGuidelines: [
         "Give oneshot_subagent all necessary context, file paths, constraints, and expected deliverables; it cannot see the parent conversation.",
         `A receipt is not an answer. After one, keep working on independent tasks and retrieve the result with ${JOBS_TOOL_NAME} before relying on it or claiming dependent work is complete.`,
+        waking
+          ? `A completion notice arrives as a new message when a background job finishes; if you have nothing else to do, end your turn instead of polling ${JOBS_TOOL_NAME}.`
+          : `Completion notices do not start a turn; use mode "foreground" when you are blocked on the answer.`,
         foregroundDefault
           ? 'Pass mode "background" when you have independent work to do while the subagent runs.'
           : 'Pass mode "foreground" only when you are blocked on the answer.',
@@ -372,20 +376,18 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
       exposure: "direct",
       label: "Subagent jobs",
       description: "Manage one-shot subagent jobs launched from this session: list them, check status, retrieve a finished job's answer, " +
-        "wait (bounded) for jobs to finish, or cancel one. Retrieving a running job returns its state, not an error. " +
+        "or cancel one. Retrieving a running job returns its state, not an error. " +
         "Failed, timed-out, cancelled and interrupted jobs are returned as errors; their child may have left partial changes.",
-      promptSnippet: `${JOBS_TOOL_NAME}: list, check, retrieve, wait for, or cancel background subagent jobs from this session`,
+      promptSnippet: `${JOBS_TOOL_NAME}: list, check, retrieve, or cancel background subagent jobs from this session`,
       promptGuidelines: [
-        `Retrieve a background job's answer with ${JOBS_TOOL_NAME} action "result" before relying on it; use "wait" only when you have nothing else to do.`,
+        `Retrieve a background job's answer with ${JOBS_TOOL_NAME} action "result" before relying on it, typically after its completion notice.`,
       ],
       annotations: { openWorldHint: false },
       parameters: Type.Object({
-        action: StringEnum(["list", "status", "result", "wait", "cancel"] as const, { description: "list: this session's jobs; status: state only; result: the answer of a finished job; wait: block until jobs finish (bounded); cancel: stop a job" }),
-        job_id: Type.Optional(Type.String({ pattern: "^job-[0-9a-f]{12}$", description: "Job ID from the receipt" })),
-        job_ids: Type.Optional(Type.Array(Type.String({ pattern: "^job-[0-9a-f]{12}$" }), { maxItems: 16, description: "For wait: jobs to wait for (default: all running jobs of this session)" })),
-        timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 600, description: "For wait: maximum seconds to wait (default 60)" })),
+        action: StringEnum(["list", "status", "result", "cancel"] as const, { description: "list: this session's jobs; status: state only; result: the answer of a finished job; cancel: stop a job" }),
+        job_id: Type.Optional(Type.String({ pattern: "^job-[0-9a-f]{12}$", description: "Job ID from the receipt or completion notice" })),
       }),
-      async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<JobsToolDetails>> {
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<JobsToolDetails>> {
         if (role === "child") throw new Error("One-shot subagents have no background jobs");
         const owner = ctx.sessionManager.getSessionId();
         const action = params.action;
@@ -393,16 +395,6 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
           const all = await jobs.list({ owner, limit: 30 });
           return { content: text(all.length ? all.map((job) => `- ${summaryLine(job)}`).join("\n") : "No subagent jobs in this session."),
             details: jobsDetails(action, all) };
-        }
-        if (action === "wait") {
-          const ids = params.job_ids?.length ? params.job_ids : params.job_id ? [params.job_id]
-            : (await jobs.list({ owner, active: true })).filter((job) => job.waitPolicy === "background").map((job) => job.id);
-          if (!ids.length) return { content: text("No running background subagent jobs in this session."), details: jobsDetails(action, []) };
-          for (const id of ids) await owned(id, ctx);
-          // Aborting the wait only stops waiting; the jobs keep running.
-          const waited = await jobs.wait(ids, (params.timeout_seconds ?? 60) * 1000, signal);
-          const result = await retrieve(waited);
-          return { content: text(result.text), details: jobsDetails(action, waited), usage: result.usage, isError: result.isError };
         }
         if (!params.job_id) throw new Error(`Action "${action}" requires job_id`);
         const job = await owned(params.job_id, ctx);
@@ -421,7 +413,7 @@ export default function oneshotSubagentExtension(pi: ExtensionAPI, jobs = new Ag
           isError: cancelled.outcome !== "cancelled" && result.isError };
       },
       renderCall(args, theme) {
-        const target = args.job_id ?? (args.job_ids?.length ? args.job_ids.join(", ") : "");
+        const target = args.job_id ?? "";
         return new Text(theme.fg("toolTitle", theme.bold("◆ subagent jobs")) + theme.fg("accent", `  ${args.action ?? "…"}`) +
           (target ? theme.fg("dim", ` · ${oneLine(target, 120)}`) : ""), 0, 0);
       },

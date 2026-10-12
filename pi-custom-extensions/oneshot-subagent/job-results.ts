@@ -51,7 +51,7 @@ export async function resultText(job: JobSnapshot, now = Date.now()): Promise<{ 
   if (!isTerminal(status.state)) {
     const quiet = status.lastActivityAt ? ` Last activity ${duration(now - status.lastActivityAt)} ago.` : "";
     return { isError: false, text: `${jobLabel(job)} is ${stateLabel(job, now)}; no result yet.${quiet} ` +
-      `Keep working and check again later, or use subagent_jobs action "wait".\n\n${footer}` };
+      `A completion notice arrives when it finishes; continue with independent work or end your turn until then.\n\n${footer}` };
   }
   if (status.state === "succeeded") {
     const answer = status.resultPath ? await readPrefix(status.resultPath, MODEL_RESULT_LIMIT) : undefined;
@@ -82,7 +82,7 @@ export function receiptText(job: JobSnapshot, backgrounded: boolean, now = Date.
   const deadline = backgrounded ? `its original ${request.timeoutSeconds}s timeout still applies` : `timeout ${request.timeoutSeconds}s`;
   return `${intro} (${request.agent}${request.model ? ` · ${request.model}` : ""}; ${deadline}.) ` +
     "This is a receipt, not its answer. Continue with independent work; a short notice arrives when it finishes. " +
-    `Retrieve its answer with subagent_jobs {"action":"result","job_id":"${job.id}"} (or "wait") before relying on it, ` +
+    `Retrieve its answer with subagent_jobs {"action":"result","job_id":"${job.id}"} before relying on it, ` +
     `and do not edit files it may be changing until then.\n\n[Subagent job ${job.id}: ${job.dir}]`;
 }
 

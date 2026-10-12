@@ -1,4 +1,5 @@
 {
-  "defaultMode": "foreground",
-  "allowBackgroundShortcut": true
+  "defaultMode": "background",
+  "allowBackgroundShortcut": true,
+  "completionNotice": "followUp"
 }

@@ -146,7 +146,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const jobs = new AgentJobs({ root: join(root, "state"), supervisor });
   const configPath = join(root, "oneshot-subagent.json");
-  await writeFile(configPath, JSON.stringify({ defaultMode: "background", allowBackgroundShortcut: true }));
+  await writeFile(configPath, JSON.stringify({ completionNotice: "steer" }));
   const owner = await register({}, jobs, "owner-session", { configPath }).start();
   const other = await register({}, jobs, "other-session", { configPath }).start();
   const run = (instance: typeof owner, tool: "tool" | "jobsTool", params: Record<string, unknown>, signal?: AbortSignal) =>
@@ -156,7 +156,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
     return result?.messages?.at(-1);
   };
   try {
-    await t.test("configured background default: launch returns a receipt promptly, not an answer", async () => {
+    await t.test("shipped background default: launch returns a receipt promptly, not an answer", async () => {
       process.env.ONESHOT_TEST_CASE = "hang";
       const receipt = await run(owner, "tool", { task: "Long task", name: "long" });
       assert.equal(receipt.isError, undefined);
@@ -183,17 +183,9 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
       assert.match((cancelled.content[0] as { text: string }).text, /partial file changes/);
     });
 
-    await t.test("cancelling a subagent_jobs wait stops waiting only", async () => {
-      process.env.ONESHOT_TEST_CASE = "hang";
-      const jobId = ((await run(owner, "tool", { task: "Hang", name: "waited" })).details as ReceiptDetails).jobId;
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), 300);
-      const started = Date.now();
-      const waited = await run(owner, "jobsTool", { action: "wait", job_ids: [jobId], timeout_seconds: 60 }, controller.signal);
-      assert.ok(Date.now() - started < 10_000, "the wait returned when cancelled");
-      assert.match((waited.content[0] as { text: string }).text, /no result yet/);
-      assert.equal((await jobs.inspect(jobId))!.status.state, "running", "the job keeps running");
-      await run(owner, "jobsTool", { action: "cancel", job_id: jobId });
+    await t.test("there is no blocking wait action; completion notices wake the model instead", async () => {
+      assert.doesNotMatch(JSON.stringify(owner.jobsTool!.parameters), /"wait"/);
+      assert.ok(owner.tool!.promptGuidelines!.some((line) => /completion notice arrives .* end your turn instead of polling/.test(line)));
     });
 
     await t.test("an explicit foreground mode overrides the background default", async () => {
@@ -204,21 +196,22 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
       assert.equal(result.usage?.input, 7);
     });
 
-    await t.test("wait retrieves the answer and reports usage exactly once", async () => {
+    await t.test("result retrieves a finished answer and reports usage exactly once", async () => {
       process.env.ONESHOT_TEST_CASE = "success";
       const receipt = await run(owner, "tool", { task: "Quick task", name: "quick" });
       const jobId = (receipt.details as { jobId: string }).jobId;
-      const waited = await run(owner, "jobsTool", { action: "wait", job_ids: [jobId], timeout_seconds: 20 });
-      assert.notEqual(waited.isError, true);
-      assert.match((waited.content[0] as { text: string }).text, /Final 😀 answer/);
-      assert.equal(waited.usage?.input, 7);
+      await jobs.wait([jobId], 20_000);
+      const first = await run(owner, "jobsTool", { action: "result", job_id: jobId });
+      assert.notEqual(first.isError, true);
+      assert.match((first.content[0] as { text: string }).text, /Final 😀 answer/);
+      assert.equal(first.usage?.input, 7);
       const again = await run(owner, "jobsTool", { action: "result", job_id: jobId });
       assert.match((again.content[0] as { text: string }).text, /Final 😀 answer/);
       assert.equal(again.usage, undefined, "usage is never reported twice");
       assert.ok((await jobs.inspect(jobId))?.markers.has("delivered"));
     });
 
-    await t.test("failed jobs are retrieved as errors with the partial-changes warning; notices are sent once without a turn", async () => {
+    await t.test("failed jobs are retrieved as errors with the partial-changes warning; notices are sent once and wake the model as configured", async () => {
       process.env.ONESHOT_TEST_CASE = "error";
       const receipt = await run(owner, "tool", { task: "Failing task", name: "failing" });
       const jobId = (receipt.details as { jobId: string }).jobId;
@@ -228,7 +221,7 @@ test("background mode: receipt, owner-scoped retrieval, usage once, notices, rem
         await new Promise((resolveWait) => setTimeout(resolveWait, 100));
       const notices = owner.messages.filter((item) => item.message.content.includes(jobId));
       assert.equal(notices.length, 1);
-      assert.deepEqual(notices[0].options, { triggerTurn: false });
+      assert.deepEqual(notices[0].options, { triggerTurn: true, deliverAs: "steer" });
       assert.equal(notices[0].message.customType, "subagent-job-notice");
       assert.ok(!other.messages.some((item) => item.message.content.includes(jobId)), "never delivered to another session");
       assert.match((await reminder(owner)).content, new RegExp(jobId), "a notice alone does not clear the reminder");
@@ -297,11 +290,11 @@ test("session_shutdown aborts in-flight foreground runs for every reason", async
   }
 });
 
-test("config: missing file keeps foreground default and the shortcut; disabling it registers no shortcut", async () => {
+test("config: missing file uses the background default and the shortcut; disabling it registers no shortcut", async () => {
   const defaults = await register().start();
   assert.deepEqual([...defaults.shortcuts.keys()], ["shift+up"]);
-  assert.match(defaults.tool!.description, /Default mode here: "foreground"/);
-  assert.match(defaults.tool!.promptSnippet!, /waits for the answer by default/);
+  assert.match(defaults.tool!.description, /Default mode here: "background"/);
+  assert.match(defaults.tool!.promptSnippet!, /runs in the background by default/);
   const configPath = join(scratch, "no-shortcut.json");
   await writeFile(configPath, JSON.stringify({ allowBackgroundShortcut: false }));
   const disabled = await register({}, undefined, "session-1", { configPath }).start();
@@ -318,7 +311,9 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
   const previous = { PATH: process.env.PATH, ONESHOT_TEST_CASE: process.env.ONESHOT_TEST_CASE };
   process.env.PATH = `${bin}:${process.env.PATH}`;
   const jobs = new AgentJobs({ root: join(root, "state"), supervisor });
-  const owner = await register({}, jobs, "fg-owner").start();
+  const configPath = join(root, "oneshot-subagent.json");
+  await writeFile(configPath, JSON.stringify({ defaultMode: "foreground" }));
+  const owner = await register({}, jobs, "fg-owner", { configPath }).start();
   const run = (params: Record<string, unknown>, signal?: AbortSignal, updates?: RunDetails[]) =>
     owner.tool!.execute("call-fg", { cwd: root, ...params }, signal, updates && ((update: { details: unknown }) => { updates.push(update.details as RunDetails); }),
       owner.context as unknown as ExtensionToolContext);
@@ -332,7 +327,7 @@ test("foreground jobs are supervised: answer, send to background, Esc and shortc
     assert.fail(`expected ${count} attached foreground jobs`);
   };
   try {
-    await t.test("default foreground returns the final answer with usage once and no completion notice", async () => {
+    await t.test("configured foreground default returns the final answer with usage once and no completion notice", async () => {
       process.env.ONESHOT_TEST_CASE = "success";
       const updates: RunDetails[] = [];
       const result = await run({ task: "Quick", name: "quick" }, undefined, updates);

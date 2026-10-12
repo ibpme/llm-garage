@@ -4,6 +4,7 @@ import type { AgentJobs, JobSnapshot } from "../shared/agent-jobs/jobs.ts";
 import { isTerminal } from "../shared/agent-jobs/store.ts";
 import { oneLine } from "./events.ts";
 import { duration, isOutstanding, noticeText } from "./job-results.ts";
+import type { NoticeMode } from "./config.ts";
 
 export const NOTICE_TYPE = "subagent-job-notice";
 export const WIDGET_KEY = "subagent-jobs";
@@ -54,12 +55,14 @@ export class JobWatcher {
   private jobs: JobSnapshot[] = [];
   private unsubscribe?: () => void;
   private delivering = Promise.resolve();
+  private readonly mode: NoticeMode;
   expanded = false;
 
-  constructor(pi: ExtensionAPI, store: AgentJobs, ctx: ExtensionContext) {
+  constructor(pi: ExtensionAPI, store: AgentJobs, ctx: ExtensionContext, mode: NoticeMode = "followUp") {
     this.pi = pi;
     this.store = store;
     this.ctx = ctx;
+    this.mode = mode;
     this.owner = ctx.sessionManager.getSessionId();
   }
 
@@ -122,7 +125,8 @@ export class JobWatcher {
     const details: NoticeDetails = { jobs: finished.map((job) => ({
       id: job.id, name: job.request.name, state: job.status.state, reason: job.status.terminalReason,
     })) };
-    // No deliverAs: appended immediately when idle, or after the current turn's tool results while running.
-    this.pi.sendMessage({ customType: NOTICE_TYPE, content: noticeText(finished), display: true, details }, { triggerTurn: false });
+    // The notice names the jobs, not their answers; the model retrieves those with subagent_jobs.
+    this.pi.sendMessage({ customType: NOTICE_TYPE, content: noticeText(finished), display: true, details },
+      this.mode === "passive" ? { triggerTurn: false } : { triggerTurn: true, deliverAs: this.mode });
   }
 }

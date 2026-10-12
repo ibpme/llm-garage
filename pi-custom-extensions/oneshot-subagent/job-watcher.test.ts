@@ -57,7 +57,7 @@ test("model-facing results: running is not an error, failures carry reason, part
   assert.match(outstandingText([job("running"), job("succeeded")])!, /running.*\n.*result not retrieved/);
 });
 
-test("notices are coalesced, sent without a turn, once, and only while the launching branch is active", async () => {
+test("notices are coalesced, sent once as a follow-up by default, and only while the launching branch is active", async () => {
   const sent: { message: { content: string }; options: unknown }[] = [];
   let branch = ["other-leaf"];
   const marks = new Set<string>();
@@ -78,7 +78,7 @@ test("notices are coalesced, sent without a turn, once, and only while the launc
   listener!(jobs);
   await settle();
   assert.equal(sent.length, 1);
-  assert.deepEqual(sent[0].options, { triggerTurn: false });
+  assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "followUp" });
   assert.match(sent[0].message.content, new RegExp(`${jobs[0].id}.*\\n.*${jobs[1].id}.*Pi exited`, "s"));
   assert.doesNotMatch(sent[0].message.content, new RegExp(jobs[2].id));
   listener!(jobs.map((item) => ({ ...item, status: { ...item.status, seq: 9 } })));
@@ -123,4 +123,19 @@ test("receipts state the observed state and are labeled as receipts; run details
   assert.equal(details.task, "Task");
   assert.equal(runDetails(job("cancelled"), "Task").status, "aborted");
   assert.equal(runDetails(job("timed-out"), "Task").status, "error");
+});
+
+test("notice modes: steer wakes within the current run, passive never starts a turn", async () => {
+  for (const [mode, expected] of [["steer", { triggerTurn: true, deliverAs: "steer" }], ["passive", { triggerTurn: false }]] as const) {
+    const sent: unknown[] = [];
+    let listener: ((jobs: JobSnapshot[]) => void) | undefined;
+    const store = { subscribe: (_q: unknown, callback: (jobs: JobSnapshot[]) => void) => { listener = callback; return () => {}; }, mark: async () => true } as unknown as AgentJobs;
+    const ctx = { hasUI: false, sessionManager: { getSessionId: () => "s", getBranch: () => [] } } as unknown as ExtensionContext;
+    const watcher = new JobWatcher({ sendMessage: (_message: never, options: unknown) => sent.push(options) } as unknown as ExtensionAPI, store, ctx, mode);
+    watcher.start();
+    listener!([job("succeeded")]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(sent, [expected], mode);
+    watcher.stop();
+  }
 });

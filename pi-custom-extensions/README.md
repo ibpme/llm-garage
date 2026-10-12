@@ -124,12 +124,12 @@ status; Claude supplies its status through `claude agents --json`.
 
 [`oneshot-subagent/`](oneshot-subagent/README.md) adds `oneshot_subagent` for
 self-contained delegation to a fresh Pi or Claude Code process via `scripts/agent-spawn.sh`
-in JSON mode. Every delegation runs under a detached supervisor. Foreground calls
-(the shipped default, configurable in `oneshot-subagent.json`) wait for the
-answer, and cancellation or shutdown stops them; Shift+↑ or `/agents` sends a
-running one to the background. Background jobs survive reloads and Pi exit; the
-main agent gets a job receipt, keeps working, and retrieves answers and usage with
-`subagent_jobs`. An indicator above the editor and short completion notices track
+in JSON mode. Every delegation runs under a detached supervisor. Background jobs
+(the shipped default, configurable in `oneshot-subagent.json`) survive reloads
+and Pi exit; the main agent gets a job receipt, keeps working, and retrieves
+answers and usage with `subagent_jobs` after a completion notice. Foreground calls
+wait for the answer, and cancellation or shutdown stops them; Shift+↑ or
+`/agents` sends a running one to the background. An indicator above the editor and short completion notices track
 outstanding jobs, and `/agents` inspects or cancels them. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
 and MCP/native subagents disabled. Only the main session can delegate: one-shot
 children never register the tool, and a session entry keeps that role across

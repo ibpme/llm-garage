@@ -12,11 +12,12 @@ sessions only. They work in interactive, print, and JSON modes.
 Every delegation is a durable, independently supervised job. The waiting mode only
 decides what the tool call does meanwhile:
 
-- **Foreground** (shipped default): the call waits and returns the final answer and
-  usage. The user can send it to the background while it runs; the call then
-  returns a receipt and the same child keeps running.
-- **Background**: the call returns a job receipt as soon as the child has started,
-  and the main agent keeps working. The answer is collected with `subagent_jobs`.
+- **Background** (shipped default): the call returns a job receipt as soon as the
+  child has started, and the main agent keeps working. The answer is collected
+  with `subagent_jobs` after the completion notice.
+- **Foreground**: the call waits and returns the final answer and usage. The user
+  can send it to the background while it runs; the call then returns a receipt
+  and the same child keeps running.
 
 An explicit `mode` always wins; omitting it uses the configured default.
 
@@ -29,12 +30,15 @@ edits survive sync and unsync.
 
 ```json
 {
-  "defaultMode": "foreground",
-  "allowBackgroundShortcut": true
+  "defaultMode": "background",
+  "allowBackgroundShortcut": true,
+  "completionNotice": "followUp"
 }
 ```
 
-Set `"defaultMode": "background"` to return receipts by default.
+Set `"defaultMode": "foreground"` to wait for answers by default.
+`completionNotice` controls how background completion notices reach the model
+(see below): `followUp`, `steer` or `passive`.
 `allowBackgroundShortcut: false` unbinds the send-to-background shortcut only;
 explicit background launches and the `/agents` action stay available. Missing
 files or fields use the defaults above; an invalid value produces a short warning
@@ -93,7 +97,7 @@ text(await tools.subagent_jobs({ action: "result", job_id: receipt.details.jobId
 | `provider` | Pi: parent provider when inheriting the model, otherwise requires explicit `model`; Claude: ignored, even without `model` |
 | `thinking` | Pi: parent level when inheriting the model, otherwise CLI default/suffix; Claude: compatibility alias for `effort` at common levels |
 | `effort` | Optional shared reasoning level: `low`, `medium`, `high`, `xhigh`, `max`; mapped to Pi `--thinking` or Claude `--effort` |
-| `mode` | Configured `defaultMode` (`foreground` as shipped); `background` returns a receipt now, `foreground` waits for the answer |
+| `mode` | Configured `defaultMode` (`background` as shipped); `background` returns a receipt now, `foreground` waits for the answer |
 | `timeout_seconds` | 600 in foreground, 1,800 in background, chosen at launch; range 1–3,600 |
 
 Every call is a new session. The child does **not** inherit the parent's transcript:
@@ -118,7 +122,6 @@ a job to the background does not check the limit.
 | `list` | This session's jobs, newest first, with state and whether the result was retrieved |
 | `status` | One job's state |
 | `result` | A finished job's answer (40 KiB model limit, full-response path); a running job returns its state, not an error |
-| `wait` | Wait up to `timeout_seconds` (default 60, max 600) for `job_ids` (default: all running background jobs), then return their results/states. Cancelling the wait never cancels the jobs |
 | `cancel` | Stop the job's process group; idempotent |
 
 A failed, timed-out, cancelled or interrupted job is returned as a tool error with
@@ -127,7 +130,7 @@ that the child may have left partial file changes in its working directory. Noth
 is retried automatically.
 
 Child usage is reported to Pi once per job: a foreground answer, or the first
-`result`/`wait`/`cancel` response that returns a finished background job, carries
+`result`/`cancel` response that returns a finished background job, carries
 its usage (partial for interrupted Claude runs), guarded by a durable
 `usage-delivered` marker. Receipts never carry usage. Usage of jobs whose result is
 never retrieved does not reach the session totals.
@@ -137,10 +140,21 @@ While a session has running jobs or finished jobs whose result was not retrieved
 last message of each model request. It is not saved to the session, so it
 survives compaction without changing the cached prompt prefix.
 
-When background jobs finish, a short completion notice (state and job ID, not the
-answer) is added to the owning session with `triggerTurn: false`: immediately when idle, or
-after the current turn's tool results while the agent runs. It never starts a turn
-or steals focus. Notices are sent once, only while the owning session is active
+When background jobs finish, the extension (which already polls job state) sends
+the owning session a short completion notice: state and job ID, not the answer.
+The model then retrieves the answer with `subagent_jobs` `result`. There is no
+blocking wait action; a model with nothing else to do ends its turn and is woken
+by the notice. `completionNotice` selects the delivery:
+
+| Mode | Agent running | Agent idle |
+|---|---|---|
+| `followUp` (default) | Queued until the current run would stop, then the agent continues with it | Starts a turn |
+| `steer` | Injected after the current tool results, within the run | Starts a turn |
+| `passive` | Appended at the end of the turn; never starts one | Appended only |
+
+A woken turn is a model call the user did not prompt; choose `passive` to avoid
+that. In `passive` mode the prompt guidelines tell the model to use foreground
+mode when it is blocked on an answer. Notices are sent once, only while the owning session is active
 and the branch that launched the job is the current branch; otherwise they wait
 for that session's next start or for the branch to become active again. Batch
 completions are coalesced. Foreground answers are returned by their own tool
@@ -166,13 +180,12 @@ it polls the job's durable status for progress and the final answer.
 
 | Event | Foreground (attached wait) | Background (or sent to background) |
 |---|---|---|
-| Normal completion | Tool returns the final answer and usage | Notice; answer via `subagent_jobs` |
+| Normal completion | Tool returns the final answer and usage | Notice (wakes the model unless `passive`); answer via `subagent_jobs` `result` |
 | User sends it to the background | Wait released; tool returns a receipt | Already background; no change |
 | Esc during launch or tool execution | Job cancelled | Launch cancelled if not yet acknowledged; otherwise continues |
 | `/reload`, quit, `/new`, `/resume`, fork | Job cancelled | Continues; ownership stays with the launching session |
 | Pi crashes or loses its terminal | Job continues without a waiter; its result stays retrievable | Continues; results stay viewable in `/agents` |
 | Explicit cancel (`subagent_jobs` or `/agents`) | Process group stopped (SIGTERM, then SIGKILL) | Same |
-| Cancelling a `subagent_jobs` wait | — | Stops waiting only |
 | Deadline | Process group stopped; recorded as timed-out | Same |
 | Supervisor killed with SIGTERM/SIGINT | Child stopped; recorded as interrupted | Same |
 | Supervisor disappears | Shown as status unknown while the child runs; the foreground wait gives up and cancels 30s after the deadline | While the child still runs the job is shown as status unknown and remains cancellable; otherwise it is recorded as interrupted. Success is never inferred |

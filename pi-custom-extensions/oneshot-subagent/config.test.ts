@@ -12,7 +12,7 @@ const write = async (name: string, content: string) => { const path = join(root,
 
 test("missing config uses the shipped defaults silently", () => {
   assert.deepEqual(loadConfig(join(root, "absent.json")), { config: DEFAULT_CONFIG, warnings: [] });
-  assert.deepEqual(DEFAULT_CONFIG, { defaultMode: "foreground", allowBackgroundShortcut: true });
+  assert.deepEqual(DEFAULT_CONFIG, { defaultMode: "background", allowBackgroundShortcut: true, completionNotice: "followUp" });
 });
 
 test("the tracked default file matches the built-in defaults", async () => {
@@ -21,19 +21,20 @@ test("the tracked default file matches the built-in defaults", async () => {
 });
 
 test("valid foreground and background configs", async () => {
-  assert.deepEqual(loadConfig(await write("bg.json", '{"defaultMode":"background","allowBackgroundShortcut":false}')),
-    { config: { defaultMode: "background", allowBackgroundShortcut: false }, warnings: [] });
-  assert.deepEqual(loadConfig(await write("fg.json", '﻿{"defaultMode":"foreground"}')).config, DEFAULT_CONFIG);
+  assert.deepEqual(loadConfig(await write("fg.json", '{"defaultMode":"foreground","allowBackgroundShortcut":false,"completionNotice":"passive"}')),
+    { config: { defaultMode: "foreground", allowBackgroundShortcut: false, completionNotice: "passive" }, warnings: [] });
+  assert.deepEqual(loadConfig(await write("bg.json", '﻿{"defaultMode":"background"}')).config, DEFAULT_CONFIG);
 });
 
 test("invalid fields fall back individually with concise warnings", async () => {
-  const { config, warnings } = loadConfig(await write("bad.json", '{"defaultMode":"later","allowBackgroundShortcut":"yes"}'));
+  const { config, warnings } = loadConfig(await write("bad.json", '{"defaultMode":"later","allowBackgroundShortcut":"yes","completionNotice":"interrupt"}'));
   assert.deepEqual(config, DEFAULT_CONFIG);
-  assert.equal(warnings.length, 2);
+  assert.equal(warnings.length, 3);
   assert.match(warnings[0], /defaultMode must be "foreground" or "background"/);
   assert.match(warnings[1], /allowBackgroundShortcut must be true or false/);
-  const mixed = loadConfig(await write("mixed.json", '{"defaultMode":"background","allowBackgroundShortcut":1}'));
-  assert.deepEqual(mixed.config, { defaultMode: "background", allowBackgroundShortcut: true });
+  assert.match(warnings[2], /completionNotice must be "followUp", "steer" or "passive"/);
+  const mixed = loadConfig(await write("mixed.json", '{"defaultMode":"foreground","allowBackgroundShortcut":1}'));
+  assert.deepEqual(mixed.config, { defaultMode: "foreground", allowBackgroundShortcut: true, completionNotice: "followUp" });
   assert.equal(mixed.warnings.length, 1);
 });
 
