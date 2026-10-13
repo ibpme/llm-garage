@@ -1,13 +1,28 @@
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, type OverlayOptions } from "@earendil-works/pi-tui";
+import { Key, matchesKey, wrapTextWithAnsi, type OverlayOptions } from "@earendil-works/pi-tui";
 import type { AgentSnapshot, RegistryView } from "./reader.ts";
+import { createSessionReader, type SessionSnapshot, type SessionReaderOptions } from "./session.ts";
 import type { Origin, PaneAction, performPaneAction } from "./tmux-actions.ts";
 import { agentGroup, agentKey, agentRow, sortAgents, clean, detailLines, frame, paneActionReason } from "./view.ts";
 
 export interface BrowserDependencies {
   readRegistry(): Promise<RegistryView>;
+  readSession?(agent: AgentSnapshot): Promise<SessionSnapshot>;
+  currentPi?: SessionReaderOptions["currentPi"];
   origin?: Origin;
   performPaneAction: typeof performPaneAction;
+}
+
+interface SessionPreview {
+  read: (agent: AgentSnapshot) => Promise<SessionSnapshot>;
+  agent: AgentSnapshot;
+  snapshot?: SessionSnapshot;
+  loading: boolean;
+  reading: boolean;
+  follow: boolean;
+  scroll: number;
+  length: number;
+  error: string;
 }
 
 export function overlayOptions(terminal: { columns: number; rows: number }): OverlayOptions {
@@ -35,6 +50,22 @@ export function createBrowser(
   let error = "";
   let page = 8;
   let detailLength = 0;
+  let preview: SessionPreview | undefined;
+  const refreshPreview = async () => {
+    const current = preview;
+    if (closed || !current || current.reading) return;
+    current.reading = true;
+    try {
+      const snapshot = await current.read(current.agent);
+      if (!closed && preview === current) { current.snapshot = snapshot; current.error = ""; }
+    } catch (err) {
+      if (!closed && preview === current) current.error = clean(err instanceof Error ? err.message : String(err));
+    } finally {
+      current.reading = false;
+      current.loading = false;
+      if (preview === current) render();
+    }
+  };
   const render = () => { if (!closed) requestRender(); };
   const finish = () => { if (!closed) { closed = true; done(); } };
   const apply = (next: RegistryView) => {
@@ -43,6 +74,7 @@ export function createBrowser(
     const index = view.agents.findIndex(agent => agentKey(agent) === key);
     selected = index >= 0 ? index : 0;
     if (detail) detail = next.agents.find(agent => agentKey(agent) === agentKey(detail!)) ?? detail;
+    if (preview) preview.agent = next.agents.find(agent => agentKey(agent) === agentKey(preview!.agent)) ?? preview.agent;
   };
   const refresh = async () => {
     if (closed || reading || busy || pendingKill) return;
@@ -53,6 +85,7 @@ export function createBrowser(
     } catch (err) {
       if (!closed) view = { state: "unavailable", agents: view.agents, warnings: [clean(String(err))] };
     } finally { reading = false; loading = false; render(); }
+    await refreshPreview();
   };
   const action = async (agent: AgentSnapshot, kind: PaneAction) => {
     const reason = paneActionReason(view, agent, deps.origin, kind);
@@ -79,12 +112,25 @@ export function createBrowser(
     render(width: number): string[] {
       const height = Math.max(1, terminal.rows - 2);
       const inner = Math.max(1, width - 4);
-      page = Math.max(1, height - 6);
+      const usageLines = preview ? wrapTextWithAnsi(preview.snapshot?.usage ?? "Usage/cost: unavailable", inner).slice(0, Math.max(1, Math.min(4, height - 7))) : [];
+      page = Math.max(1, height - 6 - usageLines.length);
       const healthTone = view.state === "fresh" ? "success" : view.state === "unavailable" ? "error" : "warning";
       const title = theme.fg("accent", theme.bold("Agents")) + ` · ${theme.fg(healthTone, loading ? "Loading registry…" : view.state)} · ${theme.fg("muted", `${view.agents.length} sessions`)}`;
-      const warning = error || view.warnings.join(" · ");
+      const warning = error || preview?.error || [view.warnings.join(" · "), preview?.snapshot?.warnings.join(" · ")].filter(Boolean).join(" · ");
       let body: string[];
-      if (detail) {
+      if (preview) {
+        const lines = (preview.snapshot?.entries ?? []).flatMap(entry => {
+          const tone = entry.label.includes("ERROR") ? "error" : entry.label.startsWith("TOOL") || entry.label.startsWith("RESULT") ? "dim" : "accent";
+          let text = wrapTextWithAnsi(entry.text, inner);
+          if ((entry.label.startsWith("TOOL") || entry.label.startsWith("RESULT")) && text.length > 6) text = [...text.slice(0, 5), "… [truncated]"];
+          return [theme.fg(tone, theme.bold(entry.label)), ...text, ""];
+        });
+        if (!lines.length) lines.push(preview.loading ? "Loading session…" : preview.error ? "Session preview unavailable." : "No visible session messages yet.");
+        preview.length = lines.length;
+        const bottom = Math.max(0, lines.length - page);
+        preview.scroll = preview.follow ? bottom : Math.max(0, Math.min(preview.scroll, bottom));
+        body = lines.slice(preview.scroll, preview.scroll + page);
+      } else if (detail) {
         const listed = view.agents.some(agent => agentKey(agent) === agentKey(detail!));
         const lines = detailLines(detail, inner, theme, listed);
         detailLength = lines.length;
@@ -109,23 +155,25 @@ export function createBrowser(
         if (!body.length) body = [loading ? "Loading registry…" : view.state === "unavailable" ? "Start agents-registry to browse live agents." : "No agents recorded."];
       }
       while (body.length < page) body.push("");
-      const target = detail ?? view.agents[selected];
+      const target = preview?.agent ?? detail ?? view.agents[selected];
       const eligible = target && !paneActionReason(view, target, deps.origin, "attach");
       const movable = target && !paneActionReason(view, target, deps.origin, "horizontal");
       const paneHints = movable ? " · V/H split · Ctrl+X kill" : "";
       const footer = pendingKill ? `Kill entire pane ${pendingKill.pane?.id} for PID ${pendingKill.process.pid} (${clean(pendingKill.session.name ?? pendingKill.harness)})? [y/n]`
-        : busy ? "Checking and acting…" : detail ? `↑↓ scroll · Esc back · r refresh${paneHints}`
-          : `↑↓ navigate · Enter ${eligible ? "attach" : "details"} · i details${paneHints} · r refresh · q close`;
+        : busy ? "Checking and acting…" : preview ? `↑↓ scroll · End follow · ←/Esc back · r refresh · ${preview.follow ? "Following" : "Paused"}`
+          : detail ? `↑↓ scroll · Esc back · r refresh${paneHints}`
+          : `↑↓ navigate · → session · Enter ${eligible ? "attach" : "details"} · i details${paneHints} · r refresh · q close`;
       const lines = height < 7
         ? pendingKill ? [` ${footer}`] : [warning ? theme.fg("warning", clean(warning)) : body[0], ` ${footer}`]
-        : [` ${title}`, ` ${theme.fg("warning", clean(warning))}`, ...body, ` ${theme.fg(pendingKill ? "warning" : "muted", footer)}`];
+        : [` ${preview ? theme.fg("accent", theme.bold(`Session · ${clean(preview.agent.session.name ?? preview.agent.session.id ?? preview.agent.harness)}`)) : title}`, ` ${theme.fg("warning", clean(warning))}`, ...usageLines.map(line => ` ${theme.fg("muted", line)}`), ...body, ` ${theme.fg(pendingKill ? "warning" : "muted", footer)}`];
       return frame(lines, width, height, theme);
     },
     handleInput(data: string): void {
       if (closed) return;
-      const back = matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q";
+      const back = matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c")) || data === "q" || (!!preview && matchesKey(data, Key.left));
       if (back) {
         if (pendingKill) pendingKill = undefined;
+        else if (preview) preview = undefined;
         else if (detail) { detail = undefined; scroll = 0; }
         else finish();
         render(); return;
@@ -140,6 +188,20 @@ export function createBrowser(
       error = "";
       const target = detail ?? view.agents[selected];
       if (data === "r") { void refresh(); return; }
+      if (preview) {
+        const delta = data === "k" || matchesKey(data, Key.up) ? -1 : data === "j" || matchesKey(data, Key.down) ? 1 : matchesKey(data, Key.pageUp) ? -page : matchesKey(data, Key.pageDown) ? page : 0;
+        const bottom = Math.max(0, preview.length - page);
+        if (matchesKey(data, Key.end)) { preview.follow = true; preview.scroll = bottom; }
+        else if (matchesKey(data, Key.home) || delta) {
+          preview.scroll = matchesKey(data, Key.home) ? 0 : Math.max(0, Math.min(bottom, preview.scroll + delta));
+          preview.follow = !matchesKey(data, Key.home) && preview.scroll === bottom;
+        }
+        render(); return;
+      }
+      if (target && matchesKey(data, Key.right)) {
+        preview = { read: deps.readSession ?? createSessionReader({ currentPi: deps.currentPi }), agent: target, loading: true, reading: false, follow: true, scroll: 0, length: 0, error: "" };
+        void refreshPreview(); render(); return;
+      }
       if (target && (data === "i" || matchesKey(data, Key.enter))) {
         if (!detail && data !== "i" && !paneActionReason(view, target, deps.origin, "attach")) void action(target, "attach");
         else { detail = target; scroll = 0; }
@@ -173,7 +235,7 @@ export async function openBrowser(ctx: ExtensionCommandContext, deps: BrowserDep
   try {
     await ctx.ui.custom<void>((tui, theme, _keys, done) => {
       terminal = tui.terminal;
-      browser = createBrowser(deps, terminal, theme, () => tui.requestRender(), () => done());
+      browser = createBrowser({ ...deps, currentPi: deps.currentPi ?? (() => ({ records: ctx.sessionManager.getEntries(), branch: ctx.sessionManager.getBranch() })) }, terminal, theme, () => tui.requestRender(), () => done());
       void browser.refresh();
       timer = setInterval(() => { void browser?.refresh(); }, 2000);
       timer.unref();

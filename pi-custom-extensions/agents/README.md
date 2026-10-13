@@ -43,14 +43,17 @@ pi -e ./pi-custom-extensions/agents/index.ts
 
 | Key | Action |
 |---|---|
-| Up/Down or `j`/`k`, PageUp/PageDown, Home/End | Navigate; scroll in details |
+| Up/Down or `j`/`k`, PageUp/PageDown, Home/End | Navigate; scroll in details or transcript |
+| Right Arrow | Open a compact live transcript of the selected session |
+| Left Arrow | Return from the transcript |
+| End (in transcript) | Jump to the latest messages and resume auto-follow |
 | Enter | Attach to an eligible interactive pane; otherwise show details |
 | `i` | Show metadata, including for attachable agents |
 | `V` | Move the existing pane into a top/bottom split |
 | `H` or Shift+Enter | Move the existing pane into a left/right split |
 | Ctrl+X | Confirm killing the entire selected pane with `y`/`n` |
 | `r` | Refresh |
-| Escape, Ctrl+C, or `q` | Cancel confirmation, return from details, or close |
+| Escape, Ctrl+C, or `q` | Cancel confirmation, return from transcript/details, or close |
 
 The centered modal opens immediately and refreshes every two seconds. Its size
 fills the terminal with a one-cell margin, including on large displays. The current
@@ -65,6 +68,53 @@ Selection follows harness + PID + numeric process start
 time, independent of pane moves. Details show process identity, observation time,
 activity and source, session, working directory, model, and tmux server/location.
 Registry strings are sanitized before terminal rendering.
+
+## Session preview
+
+Right Arrow replaces the list with a read-only, live-updating transcript. It opens
+at the latest messages and follows new records every two seconds. Scrolling up
+pauses auto-follow; End or scrolling back to the bottom resumes it. Left Arrow
+or Escape returns without losing the selected list row. Enter/attach and `i`
+metadata retain their existing behavior; pane-action keys do not act from the
+transcript.
+
+The preview shows user and assistant text, tool names with compact inputs/results,
+and error markers. Thinking and internal records are hidden; images/documents
+are placeholders. Tools are limited to five logical lines/600 characters, then
+at most six wrapped display lines. Text is sanitized against terminal escape
+sequences. Compact output is not a redaction mechanism: prompts and tool excerpts
+can still contain sensitive data.
+
+Pi reads the registry's session file without opening or migrating it through
+SessionManager. The most recently persisted branch is reconstructed through
+`id`/`parentId`, including summary markers and its pre-compaction history. For
+the invoking Pi process, the actual in-memory branch is used instead, including
+in-memory sessions and navigation that has not yet produced another file entry.
+Other Pi sessions cannot expose unpersisted leaf changes or token-level streaming.
+
+Claude uses the recorded session file when available; otherwise it resolves a
+unique top-level `<session-id>.jsonl` under `~/.claude/{projects,project}/*`.
+Ambiguous matches are refused. Like the standalone
+[prototype](../../claude-session-view/README.md), Claude displays records in file
+order, associates tool results with tool calls (not user prompts), and excludes
+nested subagent files.
+
+The header summarizes observed input/output/cache tokens and recorded dollar
+costs. Pi totals include recorded assistant, nested-tool, compaction, branch-summary,
+and other usage entries across branches. Claude response usage is deduplicated
+by message ID (record UUID when absent), with revised counters replacing earlier
+ones. Claude cost is only the latest logged cumulative snapshot, may lag, and is
+never estimated. Missing values show `unavailable`; incomplete totals are marked
+partial. Reasoning tokens are already included in output and are not added again.
+
+File reads consume appended bytes only, retain split JSONL/UTF-8 records until a
+newline, and reset on observed truncation or file replacement. Malformed lines
+are skipped with a warning. An in-place rewrite that regrows past the prior
+read offset between polls is not detected; logs are assumed append-only. History
+is retained in memory while the preview is open. Unavailable or unreadable files
+show an inspectable error; `r` retries. Late reads cannot replace a different
+preview or update the browser after it closes. Stale/exited agents remain
+readable when their session file is still available.
 
 ## Freshness and actions
 
@@ -130,6 +180,7 @@ legacy records are not automatically deleted.
 - `reader.ts`: canonical snapshot schema validation and health classification.
 - `browser.ts`: modal state, refresh, navigation, confirmations, action dispatch.
 - `view.ts`: list/details, responsive framing, action eligibility.
+- `session.ts`: read-only incremental Pi/Claude transcripts and usage accounting.
 - `tmux-actions.ts`: numeric identity/ancestry checks and pane operations.
 
 Snapshot types and schema come from `agents-registry`; the reader has no dependency

@@ -244,3 +244,89 @@ test("non-tmux and all non-interactive modes share one group, even with a mapped
   assert.ok(lines.findIndex(line => line.includes("review")) < groupIndex);
   browser.dispose();
 });
+
+test("Right Arrow previews the selected session, smart-follow pauses above bottom and End resumes", async () => {
+  let snapshot = { entries: Array.from({ length: 40 }, (_, i) => ({ label: "ASSISTANT", text: `message-${i}` })), usage: "input=12 · Recorded cost: $0.010000", warnings: [] };
+  const readTargets: number[] = [];
+  const browser = createBrowser({ readRegistry: async () => fresh(), readSession: async agent => { readTargets.push(agent.process.pid); return snapshot; }, performPaneAction: async () => {} }, { columns: 120, rows: 16 }, theme, () => {}, () => {});
+  await browser.refresh();
+  browser.handleInput("j");
+  browser.handleInput("\x1b[C");
+  await tick();
+  let text = browser.render(118).join("\n");
+  assert.ok(text.includes("message-39") && text.includes("input=12") && text.includes("Following"));
+  assert.deepEqual(readTargets, [200]);
+  browser.handleInput("\x1b[H");
+  text = browser.render(118).join("\n");
+  assert.ok(text.includes("message-0") && !text.includes("message-39"));
+  snapshot = { ...snapshot, entries: [...snapshot.entries, { label: "USER", text: "new-message" }] };
+  await browser.refresh();
+  text = browser.render(118).join("\n");
+  assert.ok(text.includes("message-0") && !text.includes("new-message") && text.includes("Paused"));
+  browser.handleInput("\x1b[F");
+  assert.ok(browser.render(118).join("\n").includes("new-message"));
+  snapshot = { ...snapshot, entries: [...snapshot.entries, { label: "ASSISTANT", text: "latest-message" }] };
+  await browser.refresh();
+  assert.ok(browser.render(118).join("\n").includes("latest-message"));
+  for (const width of [1, 10, 40, 118]) assert.ok(browser.render(width).every(line => visibleWidth(line) <= width));
+  browser.handleInput("\x1b[D");
+  assert.ok(browser.render(118).some(line => line.includes("→") && line.includes("review")));
+  browser.dispose();
+});
+
+test("preview failures stay inspectable and returning to list ignores late session reads", async () => {
+  let reject = true;
+  let resolve!: (value: { entries: Array<{ label: string; text: string }>; usage: string; warnings: string[] }) => void;
+  let renders = 0;
+  const browser = createBrowser({ readRegistry: async () => fresh(), readSession: async () => { if (reject) throw new Error("Session file missing"); return new Promise(r => { resolve = r; }); }, performPaneAction: async () => {} }, { columns: 100, rows: 30 }, theme, () => { renders++; }, () => {});
+  await browser.refresh();
+  browser.handleInput("\x1b[C");
+  await tick();
+  assert.ok(browser.render(100).join("\n").includes("Session file missing"));
+  reject = false;
+  browser.handleInput("r");
+  await tick();
+  browser.handleInput("\x1b");
+  const before = renders;
+  resolve({ entries: [{ label: "USER", text: "late-message" }], usage: "", warnings: [] });
+  await tick();
+  assert.equal(renders, before);
+  assert.ok(!browser.render(100).join("\n").includes("late-message"));
+  browser.dispose();
+});
+
+test("preview keeps token and cost summary visible at ordinary terminal widths", async () => {
+  const browser = createBrowser({ readRegistry: async () => fresh(), readSession: async () => ({ entries: [{ label: "USER", text: "prompt" }], usage: "Observed tokens: input=100 output=20 cache-read=3000 cache-write=0 · Recorded cost: $0.010000", warnings: [] }), performPaneAction: async () => {} }, { columns: 80, rows: 24 }, theme, () => {}, () => {});
+  await browser.refresh();
+  browser.handleInput("\x1b[C");
+  await tick();
+  const text = browser.render(78).join("\n");
+  assert.ok(text.includes("input=100") && text.includes("$0.010000") && text.includes("prompt"));
+  browser.dispose();
+});
+
+test("default preview reader follows file-backed messages and does not render after disposal", async () => {
+  const { mkdtemp, writeFile, appendFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "browser-preview-"));
+  try {
+    const file = join(dir, "session.jsonl");
+    await writeFile(file, JSON.stringify({ type: "message", id: "u", parentId: null, message: { role: "user", content: "file prompt" } }) + "\n");
+    const target = { ...agents[1], session: { ...agents[1].session, file } };
+    let renders = 0;
+    const browser = createBrowser({ readRegistry: async () => ({ ...fresh(), agents: [target] }), performPaneAction: async () => {} }, { columns: 100, rows: 30 }, theme, () => { renders++; }, () => {});
+    await browser.refresh();
+    browser.handleInput("\x1b[C");
+    // Registry refresh waits for a session read only when one is not already in flight.
+    for (let i = 0; i < 100 && !browser.render(98).join("\n").includes("file prompt"); i++) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(browser.render(98).join("\n").includes("file prompt"));
+    await appendFile(file, JSON.stringify({ type: "message", id: "a", parentId: "u", message: { role: "assistant", content: [{ type: "text", text: "file answer" }] } }) + "\n");
+    await browser.refresh();
+    assert.ok(browser.render(98).join("\n").includes("file answer"));
+    browser.dispose();
+    const before = renders;
+    await browser.refresh();
+    assert.equal(renders, before);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
