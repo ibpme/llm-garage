@@ -12,6 +12,7 @@ context/GLOBAL.md        canonical global instructions (-> CLAUDE.md / AGENTS.md
 skills/<name>/SKILL.md    canonical skills (same SKILL.md format across all four tools)
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
 mcp/pi-mcp.json           native pi MCP server defaults -- opt-in, see below
+agents-mcp/               backend-neutral agents MCP interface scaffold (stdio + Streamable HTTP)
 pi-custom-extensions/      one local Pi package of TypeScript extensions + tracked Bun lockfile
 pi-custom-config/           tracked defaults for mutable pi extension configuration
 pi-custom-keybinds/         pi-specific keybindings.json override
@@ -26,6 +27,9 @@ sync/
   sync-pi.sh
   sync-all.sh             link shared config + optionally merge pi MCP defaults
 ```
+
+See [agents-mcp/README.md](agents-mcp/README.md) for the standalone TypeScript
+agents server scaffold. It is not installed or configured by the sync scripts.
 
 ## Sync strategy
 
