@@ -100,6 +100,6 @@ export class AgentStore {
         delete copy.activity.waitingFor;
       }
       return copy;
-    }).sort((a, b) => a.provider.localeCompare(b.provider) || a.process.pid - b.process.pid || a.process.startedAt.localeCompare(b.process.startedAt));
+    }).sort((a, b) => a.provider.localeCompare(b.provider) || a.process.pid - b.process.pid || a.process.startedAt - b.process.startedAt);
   }
 }

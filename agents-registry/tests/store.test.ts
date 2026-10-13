@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AgentStore } from '../src/store.js';
 import type { AgentSnapshot, ProcessInfo, PublishMessage } from '../src/types.js';
 
-const identity = { pid: 101, startedAt: 'Wed Oct 7 10:00:00 2026' };
+const identity = { pid: 101, startedAt: 100 };
 const processInfo: ProcessInfo = { ...identity, ppid: 1, command: 'pi', args: 'pi' };
 const agent = (): AgentSnapshot => ({ schemaVersion: 1, provider: 'pi', observedAt: 1000,
   process: identity, session: { mode: 'interactive' }, activity: { state: 'unknown', source: 'process-only' } });
@@ -31,7 +31,7 @@ test('publishing preserves independent fields and rejects older group updates', 
 test('PID reuse removes the old lifetime and rejects old publisher identities', () => {
   const store = new AgentStore();
   store.publish(message(1000, { activity: { state: 'busy' } }), processInfo, 1000);
-  const reused = { ...processInfo, startedAt: 'Wed Oct 7 11:00:00 2026' };
+  const reused = { ...processInfo, startedAt: 200 };
   assert.throws(() => store.publish(message(1100, { activity: { state: 'idle' } }), reused, 1100), /identity/);
   store.reconcile({ observedAt: 1200, processes: new Map([[101, reused]]), agents: [], errors: [], successfulTmuxServers: [] });
   assert.deepEqual(store.snapshot(1200), []);
@@ -70,12 +70,12 @@ test('discovery captured before a hook cannot overwrite the newer activity', () 
 
 test('an older discovery pass cannot resurrect a replaced PID lifetime', () => {
   const store = new AgentStore();
-  const replacement = { ...processInfo, startedAt: 'Wed Oct 7 11:00:00 2026' };
+  const replacement = { ...processInfo, startedAt: 200 };
   store.publish({ ...message(2000, { activity: { state: 'busy' } }), process: { pid: 101, startedAt: replacement.startedAt } }, replacement, 2000);
   store.reconcile({ observedAt: 1500, processes: new Map([[101, processInfo]]), agents: [{ ...agent(), observedAt: 1500 }], errors: [], successfulTmuxServers: [] });
   const rows = store.snapshot(2100);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.process.startedAt, 'Wed Oct 7 11:00:00 2026');
+  assert.equal(rows[0]!.process.startedAt, 200);
 });
 
 test('session clocks are per field so delayed independent metadata can still be added', () => {

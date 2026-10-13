@@ -40,8 +40,8 @@
           "maximum": 9007199254740991
         },
         "startedAt": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/timestamp",
+          "description": "Unix epoch milliseconds of process start, with second-level precision from UTC ps lstart."
         }
       }
     },

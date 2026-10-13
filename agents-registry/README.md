@@ -155,9 +155,20 @@ still revalidate identity and pane ancestry before taking an action.
 ### Identity and liveness
 
 An agent's key is **provider + PID + process start time**. Session IDs are metadata,
-not unique process identities. Process start times use the normalized `LC_ALL=C`
-`ps lstart` string, with repeated whitespace collapsed. This is second-resolution
-OS metadata, not a globally unique process identifier.
+not unique process identities. All timestamps in snapshots, publisher messages,
+and health records are **Unix epoch milliseconds as non-negative safe integers**.
+
+Process `startedAt` is collected with `TZ=UTC LC_ALL=C ps` and converted to epoch
+milliseconds before identity checks or serialization. This makes identity stable
+across the caller's timezone and daylight-saving changes. Its source has
+**second-level precision**, so the millisecond value ends in `000`; this is not a
+globally unique process identifier. `observedAt`, `reportedAt`, and daemon health
+timestamps use millisecond-resolution clock readings.
+
+Publishers can obtain numeric process identities through the exported
+`listProcesses()` helper in `dist/discovery/processes.js`. Date strings are no
+longer accepted as `process.startedAt`. Rebuild and restart an existing writer
+to use the numeric format; startup discovery replaces its old snapshot.
 
 - Pi processes are recognized by their command or known Node/Bun entrypoint.
 - Claude sessions come from `claude agents --json` and must have a live PID in
@@ -226,7 +237,7 @@ Example publication shape (replace the identity and timestamp with actual values
   "provider": "pi",
   "process": {
     "pid": 12345,
-    "startedAt": "Wed Oct 7 10:00:00 2026"
+    "startedAt": 1791367200000
   },
   "source": "pi",
   "reportedAt": 1791367205000,
@@ -256,7 +267,7 @@ not the hook/status-line subprocess. Missing/ambiguous identity should cause a
 publisher to skip its update, not guess a PID.
 
 The daemon verifies process identity before accepting a publication. It rejects
-report timestamps more than five seconds in the future or before a parseable
+report timestamps more than five seconds in the future or before the numeric
 process start time. Model identifiers should be separated from their optional
 provider rather than joined into `provider/model-id`.
 

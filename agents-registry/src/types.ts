@@ -1,5 +1,5 @@
 export type Provider = 'pi' | 'claude';
-export interface ProcessIdentity { pid: number; startedAt: string }
+export interface ProcessIdentity { pid: number; startedAt: number }
 export interface ProcessInfo extends ProcessIdentity { ppid: number; command: string; args: string }
 export type Runner = (command: string, args: string[]) => Promise<string>;
 export type Mode = 'interactive' | 'non-interactive' | 'background' | 'unknown';

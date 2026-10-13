@@ -4,7 +4,7 @@ import type { ProcessInfo, Runner } from '../types.js';
 
 const execute = promisify(execFile);
 export const run: Runner = async (command, args) => (await execute(command, args, {
-  encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' },
+  encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', ...(command === 'ps' ? { TZ: 'UTC' } : {}) },
 })).stdout;
 export const PS_FIELDS = 'pid=,ppid=,lstart=,comm=,args=';
 
@@ -14,8 +14,11 @@ export function parseProcesses(output: string): Map<number, ProcessInfo> {
     if (!line.trim()) continue;
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s+(\S+)\s*(.*)$/.exec(line);
     if (!match) throw new Error('Invalid process snapshot');
-    const [, pid, ppid, startedAt, command, args] = match;
-    processes.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), startedAt: startedAt!.replace(/\s+/g, ' '), command: command!, args: args! });
+    const [, pid, ppid, startText, command, args] = match;
+    // ps lstart has no offset; collection uses TZ=UTC, independent of the caller's timezone.
+    const startedAt = Date.parse(`${startText!.replace(/\s+/g, ' ')} UTC`);
+    if (!Number.isSafeInteger(startedAt) || startedAt < 0) throw new Error('Invalid process start time');
+    processes.set(Number(pid), { pid: Number(pid), ppid: Number(ppid), startedAt, command: command!, args: args! });
   }
   if (!processes.size) throw new Error('Empty process snapshot');
   return processes;

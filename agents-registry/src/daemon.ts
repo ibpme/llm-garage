@@ -109,8 +109,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
         const live = await verify(message.process.pid);
         const receivedAt = Date.now();
         if (message.reportedAt > receivedAt + 5000) throw new Error('Publisher timestamp is in the future');
-        const processStartedAt = Date.parse(message.process.startedAt);
-        if (Number.isFinite(processStartedAt) && message.reportedAt < processStartedAt) throw new Error('Publisher timestamp predates process lifetime');
+        if (message.reportedAt < message.process.startedAt) throw new Error('Publisher timestamp predates process lifetime');
         store.publish(message, live, receivedAt);
         await save();
         return { ok: true };

@@ -7,7 +7,7 @@ import test from 'node:test';
 import { startDaemon } from '../src/daemon.js';
 import { request } from '../src/client.js';
 import type { DiscoveryResult, PublishMessage } from '../src/types.js';
-const processInfo = { pid: 101, startedAt: 'Wed Oct 7 10:00:00 2026', ppid: 1, command: 'pi', args: 'pi' };
+const processInfo = { pid: 101, startedAt: 100, ppid: 1, command: 'pi', args: 'pi' };
 const discovery = (): DiscoveryResult => ({ observedAt: Date.now(), processes: new Map([[101, processInfo]]), agents: [], errors: [], successfulTmuxServers: [] });
 const publish = (): PublishMessage => ({ version: 1, type: 'publish', provider: 'pi', process: { pid: 101, startedAt: processInfo.startedAt }, source: 'pi', reportedAt: Date.now(), patch: { activity: { state: 'busy' }, session: { cwd: '/repo' } } });
 
@@ -149,5 +149,21 @@ test('rejects malformed JSON without crashing the writer', async () => {
     });
     assert.equal(JSON.parse(reply).ok, false);
     assert.equal((await request(dir, { version: 1, type: 'status' })).ok, true);
+  } finally { await daemon.stop(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('numeric process start time rejects publications from before that lifetime', async () => {
+  const dir = await directory();
+  const daemon = await startDaemon({ directory: dir, intervalMs: 60000, collect: async () => discovery(), verify: async () => processInfo });
+  try {
+    const response = await request(dir, { ...publish(), reportedAt: 99 });
+    assert.equal(response.ok, false);
+    assert.match(response.error!, /predates process lifetime/);
+    assert.equal(await readFile(join(dir, 'agents.jsonl'), 'utf8'), '');
+    assert.equal((await request(dir, publish())).ok, true);
+    const row = JSON.parse((await readFile(join(dir, 'agents.jsonl'), 'utf8')).trim());
+    assert.equal(row.process.startedAt, 100);
+    assert.equal(typeof row.observedAt, 'number');
+    assert.equal(typeof row.activity.reportedAt, 'number');
   } finally { await daemon.stop(); await rm(dir, { recursive: true, force: true }); }
 });
