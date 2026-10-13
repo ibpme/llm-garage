@@ -42,6 +42,7 @@ larger features use focused modules:
 | Feature | Responsibilities |
 |---|---|
 | `agents/` | Process/tmux discovery, registry metadata, endpoint diagnostics, picker |
+| `registry-publisher.ts` | Best-effort Pi session/model/activity publication to the standalone agents-registry daemon; no browser or delegation |
 | `agent-task/` | Agent task delegation to Pi/Claude, background job tools/indicator/notices, detached supervisor, JSON event tracking, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
 | `questionnaire/` | Registration/reanswer workflow, model parsing, schemas, UI, tree compatibility |
@@ -91,6 +92,16 @@ The moved entry points are listed in `package.json`; the old `ssh.ts`,
 `stylish-tools.ts`, `prompt-suggestions.ts`, `tool-call-stats.ts`, and misspelled
 `questionnare.ts` paths are no longer entry points. Package-based loading is
 unchanged; update any custom one-off `pi -e <file>` commands to the new paths.
+
+## Standalone registry publisher
+
+`registry-publisher.ts` is a single extension for the
+[`agents-registry` daemon](../agents-registry/README.md#pi-publisher). It uses only
+Node built-ins at runtime, publishes metadata and activity on Pi lifecycle events
+and a five-second heartbeat, and silently tolerates an unavailable daemon. Start
+the daemon explicitly; loading this extension never starts it. Configure both
+with the same `AGENTS_REGISTRY_DIR` if overriding the default state directory.
+It is independent of `agents/` and `agent-task/` and does not change their behavior.
 
 ## SSH and styled tools
 

@@ -6,8 +6,10 @@ Node.js process joins discovery observations and publisher updates, then writes
 
 This is a current-state snapshot, not an append-only event log. It has no Pi SDK
 dependency and does not require an open Pi session. Nothing is installed by the
-repository's sync scripts. This version does not change the agents extension,
-install Claude hooks, or configure OS startup.
+repository's sync scripts. The optional Pi publisher below is included in the
+existing Pi extension package; it does not start or install the daemon. This
+version does not change the agents extension, install Claude hooks, or configure
+OS startup.
 
 ## Install and build
 
@@ -96,7 +98,7 @@ claude agents --json ─┐
 ps process snapshot ─┼─ discovery ────┐
 configured tmux ─────┘                │
                                      ▼
-future Pi / Claude publishers ── Unix socket ── registry store
+Pi publisher / future Claude hooks ── Unix socket ── registry store
                                                  │
                                           atomic replacement
                                                  │
@@ -114,8 +116,8 @@ published state or resurrect a replaced PID lifetime.
 
 Tmux does not send lifecycle or model events to the daemon. Pane creation,
 movement, and termination are detected by the next discovery scan. Pi/Claude
-publishing is a separate input; the future integrations shown below are not
-installed by this project.
+publishing is a separate input; Pi uses the publisher below, while Claude hook
+and status-line publication remain future integrations.
 
 ```mermaid
 flowchart TD
@@ -136,7 +138,7 @@ flowchart TD
     JOIN --> PICK["Choose nearest matching pane<br/>Tie-break: server path, then pane ID"]
     PICK --> OBS["Discovery observations<br/>Optional singular pane with server identity"]
 
-    FUTURE["Future Pi events, Claude hooks,<br/>and status-line publications"] -.-> SOCKET["Private registry Unix socket"]
+    FUTURE["Pi publisher events, future Claude hooks,<br/>and status-line publications"] -.-> SOCKET["Private registry Unix socket"]
     SOCKET --> VERIFY["Validate message and verify live PID/start time"]
     VERIFY --> STORE["Serialized registry merge"]
     OBS --> STORE
@@ -207,6 +209,43 @@ check and advances `observedAt` without pretending its metadata was just reporte
   identifies the tmux server. Successful discovery clears vanished mappings;
   failed discovery of the mapped server retains its last mapping unless a new
   successful mapping is found.
+
+## Pi publisher
+
+[`../pi-custom-extensions/registry-publisher.ts`](../pi-custom-extensions/registry-publisher.ts)
+is a single, independent Pi extension that publishes to this daemon. It is listed
+in the existing Pi package manifest and loads through the normal Pi package sync.
+To load only this publisher, from the repository root:
+
+```bash
+pi --extension ./pi-custom-extensions/registry-publisher.ts
+```
+
+Start the daemon separately using the commands above. Both processes must use the
+same runtime directory (`AGENTS_REGISTRY_DIR`, then `XDG_STATE_HOME`, then
+`~/.local/state/agents-registry`). No daemon build or runtime dependencies are
+needed by the publisher itself; its runtime imports are Node built-ins only.
+
+The publisher obtains its own PID/start time from `TZ=UTC LC_ALL=C ps`, then
+reports session ID/file/name/cwd, mode, selected model, and activity. TUI mode is
+`interactive`; JSON, print, and RPC modes are `non-interactive`. Blocking Pi UI
+prompts report `waiting` with `waitingFor: "ui_prompt"`; prompt titles and contents
+are never sent. Busy runs remain busy through `agent_end`, becoming idle at
+`agent_settled`. Missing session names/files and models are explicitly cleared.
+
+Full reports are refreshed every five seconds, keeping activity fresh under the
+default 20-second TTL and repopulating metadata after daemon restarts. If you
+lower the daemon's activity TTL, keep it comfortably above five seconds. Identity
+lookup failures skip publication and retry on the next heartbeat rather than
+guessing a process lifetime. Socket requests time out after one second, with at
+most one in flight and one coalesced pending update. Missing sockets, rejected
+reports, and connection failures never block Pi events or print to its output.
+Reload/shutdown stops timers and closes the current socket; discovery handles
+process removal, rather than a publisher deleting a row on session changes.
+
+This adds no tools, commands, agent browser, task delegation, Claude hooks, legacy
+registry-file writes, or daemon management. `pi-custom-extensions/agents/` and
+`pi-custom-extensions/agent-task/` are unchanged and are not runtime dependencies.
 
 ## Publisher interface
 
@@ -283,7 +322,7 @@ Exercise a publisher without installing integrations:
 node dist/cli.js publish < message.json
 ```
 
-A future TypeScript/JavaScript publisher can use the bounded-time client:
+Other TypeScript/JavaScript publishers can use the bounded-time client:
 
 ```js
 import { request } from './dist/client.js';

@@ -33,6 +33,7 @@
       "./questionnaire/index.ts",
       "./readmd.ts",
       "./reasoning-tokens.ts",
+      "./registry-publisher.ts",
       "./ssh/index.ts",
       "./stash.ts",
       "./status-line.ts",
