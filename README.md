@@ -13,6 +13,7 @@ skills/<name>/SKILL.md    canonical skills (same SKILL.md format across all four
 prompts/<name>.md         canonical, manually-invoked "/name" commands (frontmatter + $ARGUMENTS body)
 mcp/pi-mcp.json           native pi MCP server defaults -- opt-in, see below
 agents-mcp/               backend-neutral agents MCP interface scaffold (stdio + Streamable HTTP)
+agents-registry/          standalone background writer of live agent JSONL snapshots
 pi-custom-extensions/      one local Pi package of TypeScript extensions + tracked Bun lockfile
 pi-custom-config/           tracked defaults for mutable pi extension configuration
 pi-custom-keybinds/         pi-specific keybindings.json override
@@ -29,7 +30,9 @@ sync/
 ```
 
 See [agents-mcp/README.md](agents-mcp/README.md) for the standalone TypeScript
-agents server scaffold. It is not installed or configured by the sync scripts.
+agents server scaffold. See [agents-registry/README.md](agents-registry/README.md)
+for the standalone machine-local registry daemon. Neither is installed or
+configured by the sync scripts.
 
 ## Sync strategy
 

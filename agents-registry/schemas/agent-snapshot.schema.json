@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JoinedAgentSnapshot",
+  "description": "Current verified agent process snapshot. Optional pane is scoped to its named tmux server.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "provider",
+    "observedAt",
+    "process",
+    "session",
+    "activity"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "provider": {
+      "enum": [
+        "pi",
+        "claude"
+      ]
+    },
+    "observedAt": {
+      "$ref": "#/$defs/timestamp",
+      "description": "Unix epoch milliseconds of the last successful live-process verification."
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "startedAt"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "startedAt": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "interactive",
+            "non-interactive",
+            "background",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "source"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "idle",
+            "busy",
+            "waiting",
+            "unknown"
+          ]
+        },
+        "rawState": {
+          "type": "string"
+        },
+        "waitingFor": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "pi-registry",
+            "claude-cli",
+            "process-only",
+            "claude-hook"
+          ]
+        },
+        "reportedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "reportedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "pi-registry",
+            "claude-statusline",
+            "claude-hook"
+          ]
+        },
+        "reportedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "pane": {
+      "description": "Nearest matching pane ancestry among configured tmux servers; omitted when unmapped.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server",
+        "id",
+        "sessionId",
+        "sessionName",
+        "windowIndex",
+        "paneIndex",
+        "cwd"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^%[0-9]+$"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "type": "string"
+        },
+        "windowIndex": {
+          "type": "string"
+        },
+        "paneIndex": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "server": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute tmux server socket path."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "description": "Unix epoch milliseconds",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "$id": "https://llm-garage.local/agents-registry/agent-snapshot.schema.json"
+}
