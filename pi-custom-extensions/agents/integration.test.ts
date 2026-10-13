@@ -5,8 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { act, run, snapshot, type Runner } from "./tmux.ts";
-import { discover } from "./discovery.ts";
+import { performPaneAction } from "./tmux-actions.ts";
+import { run, listProcesses, ancestryDistance } from "../../agents-registry/src/discovery/processes.ts";
+import type { Runner } from "../../agents-registry/src/types.ts";
+import type { AgentSnapshot } from "./reader.ts";
+async function discover(socket: string, runner: Runner, claudePid?: number): Promise<AgentSnapshot[]> {
+  const processes = await listProcesses(runner);
+  const panes = (await runner("tmux", ["-S", socket, "-u", "list-panes", "-a", "-F", "#{session_id}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_id}\t#{pane_pid}\t#{pane_current_path}"])).trim().split("\n").map(line => line.split("\t"));
+  return [...processes.values()].filter(info => info.command === "pi" || info.pid === claudePid).flatMap(info => {
+    const fields = panes.find(pane => ancestryDistance(info.pid, Number(pane[5]), processes) !== undefined);
+    if (!fields) return [];
+    return [{ schemaVersion: 1 as const, harness: info.pid === claudePid ? "claude" as const : "pi" as const,
+      observedAt: Date.now(), process: { pid: info.pid, startedAt: info.startedAt }, session: { mode: "interactive" as const },
+      activity: { state: "unknown" as const, source: "process-only" as const },
+      pane: { server: socket, sessionId: fields[0], sessionName: fields[1], windowIndex: fields[2], paneIndex: fields[3], id: fields[4], cwd: fields[6] } }];
+  });
+}
+const act = (socket: string, origin: string, agent: Parameters<typeof performPaneAction>[1], action: Parameters<typeof performPaneAction>[2]) => performPaneAction({ server: socket, paneId: origin }, agent, action);
 
 const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -66,17 +81,17 @@ test("isolated tmux server: discover, switch client, and move panes in both dire
     assert.notEqual(layout[0][1], layout[1][1]);
     assert.equal(layout[0][2], layout[1][2]);
 
-    // The fixture stands in for Claude's PID; discovery must not depend on its process title.
+    // Pane actions use verified registry identity, not a harness-specific process title.
     writeFileSync(fixture, 'process.title = "claude-fixture"; setInterval(() => {}, 60000);\n');
     await tmux(["new-window", "-d", "-t", "origin", "-n", "claude", `exec node ${quote(fixture)}`]);
     const claudePane = (await tmux(["display-message", "-p", "-t", "origin:claude", "#{pane_id}"])).trim();
     await delay(100);
-    const claudePid = (await snapshot(socket)).panes.find((pane) => pane.id === claudePane)?.pid;
+    const claudePid = Number((await tmux(["display-message", "-p", "-t", claudePane, "#{pane_pid}"])).trim());
     assert.ok(claudePid);
     const claudeRunner: Runner = (command, args) => command === "claude"
       ? Promise.resolve(JSON.stringify([{ pid: claudePid, kind: "interactive", cwd: directory, status: "idle" }]))
       : run(command, args);
-    const claude = (await discover(socket, claudeRunner)).find((agent) => agent.provider === "claude");
+    const claude = (await discover(socket, claudeRunner, claudePid)).find((agent) => agent.harness === "claude");
     assert.ok(claude?.pane);
     assert.equal(claude.pane.id, claudePane);
     await act(socket, origin, claude, "attach");

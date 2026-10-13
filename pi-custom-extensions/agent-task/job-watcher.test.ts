@@ -21,11 +21,11 @@ function job(state: JobState, markers: Marker[] = [], overrides: { anchor?: stri
   };
 }
 
-test("indicator: one compact line with counts and /agents hint; acknowledged and delivered jobs drop out", () => {
+test("indicator: one compact line with counts and jobs tool hint; acknowledged and delivered jobs drop out", () => {
   const jobs = [job("running"), job("running"), job("succeeded"), job("failed"), job("failed", ["acknowledged"]), job("succeeded", ["delivered"]), job("running", [], { liveness: "unknown" })];
   const [line, ...rest] = indicatorLines(jobs, theme, 100, false);
   assert.equal(rest.length, 0);
-  assert.match(line, /^Agents {2}2 running · 1 unknown · 1 ready · 1 failed +\/agents$/);
+  assert.match(line, /^Agents {2}2 running · 1 unknown · 1 ready · 1 failed +jobs tool$/);
   assert.equal(visibleWidth(line), 100);
   assert.deepEqual(indicatorLines([job("succeeded", ["delivered"])], theme, 100, false), []);
   for (const width of [1, 10, 30]) for (const item of indicatorLines(jobs, theme, width, true)) assert.ok(visibleWidth(item) <= width);
@@ -37,7 +37,7 @@ test("indicator expansion shows at most three named jobs with elapsed and quiet 
   assert.equal(lines.length, 5);
   assert.match(lines[1], /◌ one {2}running 1m 5s · quiet 45s · → read src\/api\.ts/);
   assert.match(lines[3], /✗ three {2}failed/);
-  assert.match(lines[4], /1 more in \/agents/);
+  assert.match(lines[4], /1 more · use jobs tool/);
   assert.ok(!lines.some((line) => /%/.test(line)));
 });
 

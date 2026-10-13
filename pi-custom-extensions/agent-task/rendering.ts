@@ -76,7 +76,7 @@ export function renderRun(details: RunDetails, expanded: boolean, theme: Theme, 
   if (expanded && details.jobDir) children.push(new Text(theme.fg("dim", `logs: ${details.jobDir}`), 0, 0));
   // jobDir is set once the launch is acknowledged, which is when the run becomes eligible.
   if (running && backgroundHint && details.jobDir)
-    children.push(new Text(theme.fg("dim", `${backgroundHint} or /agents → b: send to background`), 0, 0));
+    children.push(new Text(theme.fg("dim", `${backgroundHint}: send to background`), 0, 0));
   if (!expanded && !running) children.push(new Text(theme.fg("dim", "Expand for the full response and job files"), 0, 0));
   return {
     render(width) {

@@ -1,21 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { connectClaudeEndpoint, readClaudeEndpoint, readClaudeModel } from "./registry.ts";
-import { discover } from "./discovery.ts";
-import type { ProcessInfo, Runner } from "./tmux.ts";
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), "./scripts");
 const wrapper = join(scripts, "claude-statusline-wrapper.mjs");
 const installer = join(scripts, "install-claude-statusline.mjs");
 const payload = Buffer.from(' { "session_id": "session-uuid", "model": {"id": "claude-test-model", "display_name": "Test Model"}, "prompt": "DO NOT STORE", "cost": {"total_cost_usd": 42} }\n\n');
-const [weekday, month, day, year, time] = new Date(Date.now() - 60_000).toString().split(" ");
-const info: ProcessInfo = { pid: 201, ppid: 200, startedAt: `${weekday} ${month} ${day} ${time} ${year}`, command: "claude", args: "claude" };
 // Tests may run inside Claude Code, which would otherwise leak its messaging socket into every wrapper.
 const { CLAUDE_CODE_MESSAGING_SOCKET: _, ...env } = process.env;
 const invoke = (registry: string, input = payload, command = "cat", socketPath?: string) =>
@@ -37,7 +31,6 @@ test("wrapper preserves stdin bytes and renderer output, writes only model metad
     assert.equal(record.displayName, "Test Model");
     assert.equal(statSync(registry).mode & 0o777, 0o700);
     assert.equal(statSync(join(registry, "session-uuid.json")).mode & 0o777, 0o600);
-    assert.equal(readClaudeModel(directory, "session-uuid", info)?.model, "claude-test-model");
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -82,101 +75,6 @@ test("concurrent wrapper invocations use separate temp files and leave a complet
     assert.deepEqual(readdirSync(directory), ["session-uuid.json"]);
     assert.equal(JSON.parse(readFileSync(join(directory, "session-uuid.json"), "utf8")).model, "claude-test-model");
   } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test("model registry rejects malformed records, unsafe paths, future timestamps and earlier process lifetimes, but keeps idle snapshots", () => {
-  const directory = mkdtempSync(join(tmpdir(), "claude-model-read-"));
-  try {
-    invoke(join(directory, "claude"));
-    const file = join(directory, "claude", "session-uuid.json");
-    const valid = JSON.parse(readFileSync(file, "utf8"));
-    assert.ok(readClaudeModel(directory, "session-uuid", info, Date.now() + 60 * 60_000));
-    assert.equal(readClaudeModel(directory, undefined, info), undefined);
-    assert.equal(readClaudeModel(directory, "../escape", info), undefined);
-    for (const changes of [
-      { version: 2 }, { sessionId: "different" }, { updatedAt: "not a number" },
-      { updatedAt: Date.parse(info.startedAt) - 1 }, { updatedAt: Date.now() + 60_000 },
-      { model: 123 }, { model: "" }, { displayName: 42 },
-    ]) {
-      writeFileSync(file, JSON.stringify({ ...valid, ...changes }));
-      assert.equal(readClaudeModel(directory, "session-uuid", info), undefined);
-    }
-    writeFileSync(file, "broken JSON");
-    assert.equal(readClaudeModel(directory, "session-uuid", info), undefined);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test("discovery joins Claude model by session ID without overriding live CLI status or trusting orphan records", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "claude-model-discovery-"));
-  try {
-    invoke(join(directory, "claude"));
-    const ps = `200 1 Fri Oct 9 09:39:49 2020 zsh zsh\n201 200 Fri Oct 9 09:39:50 2020 claude claude\n202 200 Fri Oct 9 09:39:51 2020 claude claude\n`;
-    const runner: Runner = async (command) => command === "claude" ? JSON.stringify([
-      { pid: 201, kind: "interactive", cwd: "/work", status: "waiting", waitingFor: "permission prompt", sessionId: "session-uuid" },
-      { pid: 202, kind: "interactive", cwd: "/work", status: "idle", sessionId: "different-session" },
-      { pid: 999, kind: "background", cwd: "/work", sessionId: "session-uuid" },
-    ]) : command === "ps" ? ps : "$0\tcurrent\t0\t0\t%0\t200\t/work\n";
-    const agents = await discover("/tmp/socket", runner, directory);
-    assert.equal(agents.length, 2);
-    assert.equal(agents[0].metadata?.model, "claude-test-model");
-    assert.equal(agents[0].metadata?.modelDisplayName, "Test Model");
-    assert.equal(agents[0].metadata?.state, "waiting");
-    assert.equal(agents[0].metadata?.waitingFor, "permission prompt");
-    assert.equal(agents[1].metadata?.model, undefined);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test("endpoint capture is separate, private, optional, and tied to a live process lifetime", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "claude-endpoint-"));
-  const socketPath = join(directory, "message.sock");
-  const server = createServer((socket) => socket.end());
-  try {
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-    const registry = join(directory, "claude");
-    assert.equal(invoke(registry, payload, "cat", socketPath).status, 0);
-    const model = JSON.parse(readFileSync(join(registry, "session-uuid.json"), "utf8"));
-    assert.equal("socketPath" in model, false);
-    const endpointFile = join(registry, "endpoints", "session-uuid.json");
-    const endpoint = JSON.parse(readFileSync(endpointFile, "utf8"));
-    assert.deepEqual(Object.keys(endpoint).sort(), ["version", "sessionId", "capturedAt", "socketPath"].sort());
-    assert.equal(endpoint.socketPath, socketPath);
-    assert.equal(statSync(join(registry, "endpoints")).mode & 0o777, 0o700);
-    assert.equal(statSync(endpointFile).mode & 0o777, 0o600);
-    assert.ok(readClaudeEndpoint(directory, "session-uuid", info));
-    assert.equal(readClaudeEndpoint(directory, "../escape", info), undefined);
-    assert.equal(invoke(registry, Buffer.from('{"session_id":"socket-only"}'), "cat", socketPath).status, 0);
-    assert.equal(existsSync(join(registry, "socket-only.json")), false);
-    assert.ok(existsSync(join(registry, "endpoints", "socket-only.json")));
-    const fakeRunner: Runner = async (command) => command === "claude"
-      ? JSON.stringify([{ pid: info.pid, sessionId: "session-uuid" }])
-      : `${info.pid} ${info.ppid} ${info.startedAt} claude claude\n`;
-    const connected = await connectClaudeEndpoint(directory, "session-uuid", info, fakeRunner);
-    assert.ok(connected);
-    connected.destroy();
-    assert.equal(await connectClaudeEndpoint(directory, "session-uuid", info, async (command, args) =>
-      command === "claude" ? "[]" : fakeRunner(command, args)), undefined);
-    assert.equal(await connectClaudeEndpoint(directory, "session-uuid", { ...info, startedAt: "Wed Oct  9 09:39:50 2024" }, fakeRunner), undefined);
-    for (const changes of [
-      { sessionId: "wrong" }, { version: 2 }, { capturedAt: Date.parse(info.startedAt) - 1 },
-      { capturedAt: Date.now() + 60_000 }, { socketPath: "relative" }, { socketPath: "../escape" },
-      { socketPath: `${socketPath}\n` }, { socketPath: join(directory, "missing.sock") },
-      { socketPath: join(directory, "claude", "session-uuid.json") },
-    ]) {
-      writeFileSync(endpointFile, JSON.stringify({ ...endpoint, ...changes }));
-      assert.equal(await connectClaudeEndpoint(directory, "session-uuid", info, fakeRunner), undefined);
-    }
-    const symlink = join(directory, "linked.sock");
-    symlinkSync(socketPath, symlink);
-    writeFileSync(endpointFile, JSON.stringify({ ...endpoint, socketPath: symlink }));
-    assert.equal(await connectClaudeEndpoint(directory, "session-uuid", info, fakeRunner), undefined);
-    writeFileSync(endpointFile, JSON.stringify(endpoint));
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(socketPath, { force: true });
-    assert.equal(await connectClaudeEndpoint(directory, "session-uuid", info, fakeRunner), undefined);
-  } finally {
-    if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(directory, { recursive: true, force: true });
-  }
 });
 
 test("endpoint capture never breaks the renderer and does not write invalid paths", () => {

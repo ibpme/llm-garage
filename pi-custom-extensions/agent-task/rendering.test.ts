@@ -145,7 +145,7 @@ test("running foreground runs show the send-to-background hint once accepted, an
   const base: RunDetails = { name: "review", task: "Review", cwd: "/tmp", status: "running", activity: [], preview: "",
     turns: 0, toolCalls: 0, durationMs: 0, jobDir: "/tmp/job" };
   const text = (details: RunDetails, hint?: string) => renderRun(details, false, theme, hint).render(120).join("\n");
-  assert.match(text(base, "Shift+↑"), /Shift\+↑ or \/agents → b: send to background/);
+  assert.match(text(base, "Shift+↑"), /Shift\+↑: send to background/);
   assert.doesNotMatch(text({ ...base, jobDir: undefined }, "Shift+↑"), /send to background/, "not before the launch is acknowledged");
   assert.doesNotMatch(text({ ...base, status: "success", result: "done" }, "Shift+↑"), /send to background/);
   assert.doesNotMatch(text(base), /send to background/, "no hint when the shortcut is disabled");

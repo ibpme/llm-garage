@@ -106,8 +106,9 @@ file means the job did not record a normal exit. Pi can exit with status 0 even
 when an agent response failed or was aborted; inspect the JSON events for that.
 By default, files are saved under `~/.local/state/agent-spawn/`; use
 `--output-dir` to override the parent directory. Files may contain sensitive
-prompts, tool calls, and results and are stored in private job directories. `/agents` shows a JSON-mode job only while
-its process is running.
+prompts, tool calls, and results and are stored in private job directories.
+`/agents` can show a running child as a registry process, but does not track
+launcher jobs or logs.
 
 Omit the prompt to open Pi ready for input, or use `--prompt '...'` instead of
 `--prompt-file` for short tasks. `--shell zsh` (the default) or `--shell bash`
@@ -127,9 +128,9 @@ adds an `agent_task` tool for delegating a standalone task to Pi or Claude Code 
 JSON launcher. Every task runs as a supervised job. By default the main agent
 receives a job receipt, keeps working, is notified when the job finishes, and
 retrieves the answer with `jobs`; background jobs survive reloads and Pi
-exit and can be inspected or cancelled in `/agents`. Foreground mode (per call,
+exit and can be inspected or cancelled with the `jobs` tool. Foreground mode (per call,
 or the default via `~/.pi/agent/agent-task.json`) waits and returns the
-final answer with live progress; Shift+↑ or `/agents` sends a running foreground
+final answer with live progress; Shift+↑ sends a running foreground
 call to the background without restarting it. Each call starts fresh and supports cancellation and a
 timeout. Pi inherits the parent model by default; Claude uses its own defaults.
 Only the main (root) session can delegate: agent-task children, Pi or Claude, are
@@ -139,21 +140,19 @@ remains available in SAFE mode. Claude runs with MCP and its native `Agent`/`Tas
 neither backend is a sandbox, so a child with shell access can still launch other
 agents.
 
-## Live agent browser and Claude model metadata
+## Live agent registry browser
 
-Pi's [`/agents` extension](pi-custom-extensions/agents/README.md) discovers live Pi
-and Claude Code processes, switches to interactive tmux panes, and moves them
-into splits. Non-interactive processes are listed read-only. An optional wrapper
-captures Claude's model metadata while preserving your existing status line:
+Pi's [`/agents` extension](pi-custom-extensions/agents/README.md) reads live Pi
+and Claude snapshots from the standalone [`agents-registry`](agents-registry/README.md)
+daemon. Start the daemon explicitly and configure its tmux server sockets to
+support attach/split/kill actions. Missing or stale registry data is shown
+explicitly; there is no fallback discovery. Pi metadata comes from the independent
+`registry-publisher.ts` extension.
 
-```bash
-node pi-custom-extensions/agents/scripts/install-claude-statusline.mjs
-# Undo just this integration:
-node pi-custom-extensions/agents/scripts/install-claude-statusline.mjs --uninstall
-```
-
-The installer backs up Claude settings and changes only `statusLine.command`.
-This integration is opt-in, independent of the normal sync/unsync scripts.
+The browser does not track jobs or spawn agents. Use the existing `jobs` tool
+for delegated tasks. Legacy Claude status-line capture scripts remain available
+for installed-wrapper compatibility but are not consumed by the browser;
+endpoint diagnostics have been removed.
 
 ## Undoing a sync
 

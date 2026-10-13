@@ -13,7 +13,7 @@ export type NoticeMode = typeof NOTICE_MODES[number];
 export interface AgentTaskConfig {
   /** Waiting policy when a tool call omits `mode`. */
   defaultMode: WaitPolicy;
-  /** Whether the send-to-background shortcut is bound; explicit background launches and /agents are unaffected. */
+  /** Whether the send-to-background shortcut is bound; explicit background launches are unaffected. */
   allowBackgroundShortcut: boolean;
   completionNotice: NoticeMode;
 }

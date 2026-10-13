@@ -7,10 +7,10 @@ Node.js process joins discovery observations and publisher updates, then writes
 This is a current-state snapshot, not an append-only event log. It has no Pi SDK
 dependency and does not require an open Pi session. Nothing is installed by the
 repository's sync scripts. The optional Pi publisher below is included in the
-existing Pi extension package; it does not start or install the daemon. This
-version does not change the agents extension or configure OS startup. Claude
-hooks and status-line model publishing have separate opt-in installers; neither
-is enabled automatically.
+existing Pi extension package; it does not start or install the daemon. The Pi
+`/agents` browser reads its snapshots and health; this version does not configure
+OS startup. Claude hooks and status-line model publishing have separate opt-in
+installers; neither is enabled automatically.
 
 ## Install and build
 
@@ -245,8 +245,9 @@ Reload/shutdown stops timers and closes the current socket; discovery handles
 process removal, rather than a publisher deleting a row on session changes.
 
 This adds no tools, commands, agent browser, task delegation, Claude hooks, legacy
-registry-file writes, or daemon management. `pi-custom-extensions/agents/` and
-`pi-custom-extensions/agent-task/` are unchanged and are not runtime dependencies.
+registry-file writes, or daemon management. `pi-custom-extensions/agents/`
+consumes the snapshots independently; `pi-custom-extensions/agent-task/` is not a
+runtime dependency.
 
 ## Optional Claude main hook publisher
 

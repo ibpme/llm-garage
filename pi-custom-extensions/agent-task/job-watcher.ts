@@ -23,7 +23,7 @@ export function indicatorLines(jobs: JobSnapshot[], theme: Theme, width: number,
     [count((job) => job.status.state === "cancelled"), "cancelled", "warning"],
   ] as const;
   const left = `${theme.bold("Agents")}  ${parts.filter(([n]) => n).map(([n, label, color]) => theme.fg(color, `${n} ${label}`)).join(theme.fg("dim", " · "))}`;
-  const hint = theme.fg("dim", "/agents");
+  const hint = theme.fg("dim", "jobs tool");
   const gap = width - visibleWidth(left) - visibleWidth(hint);
   const lines = [gap >= 2 ? left + " ".repeat(gap) + hint : truncateToWidth(left, width)];
   if (expanded) {
@@ -38,7 +38,7 @@ export function indicatorLines(jobs: JobSnapshot[], theme: Theme, width: number,
       lines.push(truncateToWidth(`  ${icon} ${oneLine(job.request.name, 40)}  ` +
         theme.fg("muted", `${status.state} ${time}${quiet}`) + (activity ? theme.fg("dim", ` · ${oneLine(activity, 120)}`) : ""), width));
     }
-    if (shown.length > 3) lines.push(truncateToWidth(theme.fg("dim", `  …${shown.length - 3} more in /agents`), width));
+    if (shown.length > 3) lines.push(truncateToWidth(theme.fg("dim", `  …${shown.length - 3} more · use jobs tool`), width));
   }
   return lines;
 }

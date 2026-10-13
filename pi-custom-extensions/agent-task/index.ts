@@ -130,7 +130,7 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
       return `${theme.fg(tone, item.state === "succeeded" ? "✓" : "✗")} ${oneLine(item.name, 64)} ${theme.fg("dim", item.id)} ` +
         theme.fg(tone, item.state) + (item.reason && item.state !== "succeeded" ? theme.fg("dim", ` · ${oneLine(item.reason, 160)}`) : "");
     };
-    return new Text(theme.fg("accent", "◆ background agent tasks finished") + theme.fg("dim", "  /agents to inspect") +
+    return new Text(theme.fg("accent", "◆ background agent tasks finished") + theme.fg("dim", "  use jobs tool to inspect") +
       items.map((item) => `\n  ${line(item)}`).join(""), 0, 0);
   });
 
@@ -348,7 +348,7 @@ export default function agentTaskExtension(pi: ExtensionAPI, jobs = new AgentJob
           const label = details.backgrounded ? "◌ sent to background · job " : "◌ background job ";
           const state = details.state === "running" ? "" : ` · ${details.state}`;
           return new Text(theme.fg("borderMuted", "│ ") + theme.fg("accent", label) + theme.fg("toolOutput", details.jobId) +
-            theme.fg("dim", `${state} · ${details.agent}${details.model ? ` · ${oneLine(details.model, 60)}` : ""} · receipt, not an answer · /agents to inspect`) +
+            theme.fg("dim", `${state} · ${details.agent}${details.model ? ` · ${oneLine(details.model, 60)}` : ""} · receipt, not an answer · use jobs tool to inspect`) +
             (expanded ? `\n${theme.fg("borderMuted", "│ ")}${theme.fg("dim", `cwd: ${details.cwd}`)}\n${theme.fg("borderMuted", "│ ")}${theme.fg("dim", `files: ${details.dir}`)}` +
               `\n${theme.fg("borderMuted", "│ ")}${theme.fg("dim", `retrieve: ${JOBS_TOOL_NAME} result ${details.jobId}`)}` : ""), 0, 0);
         }

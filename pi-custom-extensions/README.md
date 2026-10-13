@@ -41,7 +41,7 @@ larger features use focused modules:
 
 | Feature | Responsibilities |
 |---|---|
-| `agents/` | Process/tmux discovery, registry metadata, endpoint diagnostics, picker |
+| `agents/` | Read-only registry snapshots/health, live-agent browser, verified tmux actions |
 | `registry-publisher.ts` | Best-effort Pi session/model/activity publication to the standalone agents-registry daemon; no browser or delegation |
 | `agent-task/` | Agent task delegation to Pi/Claude, background job tools/indicator/notices, detached supervisor, JSON event tracking, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
@@ -66,8 +66,8 @@ Important runtime relationships that a static import tree cannot show:
 | SSH redirects base styled tools in CLI override mode | `stylish-tools/overrides.ts` |
 | Reasoning tokens feed agent statistics | Event name/payload in `contracts/events.ts` |
 | Footer positions mode and SSH badges | Keys in `contracts/status-keys.ts` |
-| Claude status-line wrapper supplies agent metadata | Registry files read by `agents/registry.ts` |
-| Agent task jobs are shared by delegation and `/agents` | Durable records via `shared/agent-jobs/`; attached foreground waits via the process-wide `shared/agent-jobs/foreground.ts` service |
+| Standalone registry supplies live agent observations | Canonical snapshot schema/types from `agents-registry`; `agents/reader.ts` reads snapshot and health files |
+| Agent task owns durable jobs and foreground waits | `shared/agent-jobs/` and the process-wide `shared/agent-jobs/foreground.ts` service; independent of `/agents` |
 | The detached job supervisor runs in plain Node, outside Pi | `agent-task/supervisor.ts`, listed in `standaloneEntryPoints`; no package runtime imports |
 
 Tool-set is the sole owner of active-tool application. Its blocked-tool additions
@@ -124,12 +124,12 @@ and gutter rather than boxes; compact previews retain each tool's output caps.
 
 ## Agent browser
 
-[`agents/`](agents/README.md) adds `/agents`, a live Pi and Claude Code process
-picker. Enter switches to a selected tmux pane; Shift+V moves it into a top/bottom
-split, and Shift+H or Shift+Enter moves it into a left/right split. Headless
-processes and processes without a pane on the current server appear in a read-only
-Non-interactive section. Pi instances loading the extension publish working/idle
-status; Claude supplies its status through `claude agents --json`.
+[`agents/`](agents/README.md) adds `/agents`, a registry-backed live Pi/Claude
+browser. Start the daemon explicitly; configure its tmux sockets for pane mapping.
+The modal shows metadata and registry freshness and supports verified attach,
+split and kill on the invoking server. Stale and other-server agents are read-only.
+It does not discover/publish agents, manage jobs, spawn agents, or expose Claude
+messaging endpoints. Legacy capture scripts remain unchanged but are not consumed.
 
 ## Agent task
 
@@ -139,9 +139,9 @@ in JSON mode. Every delegation runs under a detached supervisor. Background jobs
 (the shipped default, configurable in `agent-task.json`) survive reloads
 and Pi exit; the main agent gets a job receipt, keeps working, and retrieves
 answers and usage with `jobs` after a completion notice. Foreground calls
-wait for the answer, and cancellation or shutdown stops them; Shift+↑ or
-`/agents` sends a running one to the background. An indicator above the editor and short completion notices track
-outstanding jobs, and `/agents` inspects or cancels them. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
+wait for the answer, and cancellation or shutdown stops them; Shift+↑
+sends a running one to the background. An indicator above the editor and short completion notices track
+outstanding jobs; the `jobs` tool inspects or cancels them. Delegation currently remains available in SAFE mode. Claude runs with a built-in tool allowlist
 and MCP and native `Agent`/`Task` delegation disabled. Only the main session can delegate: agent-task
 children never register the tool, and a session entry keeps that role across
 reloads, resumes, and forks. Calls do not share conversation

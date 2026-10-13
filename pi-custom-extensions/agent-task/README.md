@@ -40,7 +40,7 @@ Set `"defaultMode": "foreground"` to wait for answers by default.
 `completionNotice` controls how background completion notices reach the model
 (see below): `followUp`, `steer` or `passive`.
 `allowBackgroundShortcut: false` unbinds the send-to-background shortcut only;
-explicit background launches and the `/agents` action stay available. Missing
+explicit background launches stay available. Missing
 files or fields use the defaults above; an invalid value produces a short warning
 at session start and falls back for that field. The file is read when the
 extension loads, so run `/reload` after editing it. The tool description and
@@ -48,10 +48,8 @@ prompt guidelines state the effective default.
 
 ## Sending a foreground call to the background
 
-Press **Shift+↑** while a foreground delegation runs, or select the job in
-`/agents` and press `b`. The running tool display shows this hint once the launch
-is acknowledged (using the bound keys; none when the shortcut is disabled). Both
-use the same transition:
+Press **Shift+↑** while a foreground delegation runs. The running tool display shows this hint once the launch
+is acknowledged (using the bound keys; none when the shortcut is disabled). The shortcut uses this transition:
 
 - One eligible job is released immediately; with several, a chooser lists their
   names and job IDs; with none, a short notice says so. A launch that has not yet
@@ -135,7 +133,7 @@ its usage (partial for interrupted Claude runs), guarded by a durable
 never retrieved does not reach the session totals.
 
 While a session has running jobs or finished jobs whose result was not retrieved
-(or acknowledged in `/agents`), a short reminder listing them is appended as the
+(or previously acknowledged), a short reminder listing them is appended as the
 last message of each model request. It is not saved to the session, so it
 survives compaction without changing the cached prompt prefix.
 
@@ -165,7 +163,7 @@ or unacknowledged jobs, for example `Agents  2 running · 1 ready · 1 failed`.
 `/jobs-indicator expanded` additionally lists up to three jobs with elapsed time,
 quiet time and recent activity; `/jobs-indicator compact` restores one line.
 Finished jobs leave the indicator once their result is retrieved by the model or
-acknowledged in `/agents`; a completion notice alone does not clear them.
+previously acknowledged; a completion notice alone does not clear them.
 
 ### Supervision and exit
 
@@ -183,16 +181,16 @@ it polls the job's durable status for progress and the final answer.
 | User sends it to the background | Wait released; tool returns a receipt | Already background; no change |
 | Esc during launch or tool execution | Job cancelled | Launch cancelled if not yet acknowledged; otherwise continues |
 | `/reload`, quit, `/new`, `/resume`, fork | Job cancelled | Continues; ownership stays with the launching session |
-| Pi crashes or loses its terminal | Job continues without a waiter; its result stays retrievable | Continues; results stay viewable in `/agents` |
-| Explicit cancel (`jobs` or `/agents`) | Process group stopped (SIGTERM, then SIGKILL) | Same |
+| Pi crashes or loses its terminal | Job continues without a waiter; its result stays retrievable | Continues; results stay retrievable with `jobs` |
+| Explicit cancel (`jobs`) | Process group stopped (SIGTERM, then SIGKILL) | Same |
 | Deadline | Process group stopped; recorded as timed-out | Same |
 | Supervisor killed with SIGTERM/SIGINT | Child stopped; recorded as interrupted | Same |
 | Supervisor disappears | Shown as status unknown while the child runs; the foreground wait gives up and cancels 30s after the deadline | While the child still runs the job is shown as status unknown and remains cancellable; otherwise it is recorded as interrupted. Success is never inferred |
 
 The waiting mode is recorded durably (`job.json` `mode` plus a `backgrounded`
-marker) for `/agents` labels and notices; whether a foreground wait is still
+marker) for job state and notices; whether a foreground wait is still
 attached is known only to the Pi process that launched it. There is no exit
-prompt yet; cancel background jobs from `/agents` or with `jobs` before
+prompt yet; cancel background jobs with `jobs` before
 exiting if they should not continue.
 
 The supervisor runs TypeScript directly with Node's built-in type stripping and
@@ -374,7 +372,7 @@ manually when no longer needed.
 | File | Contents |
 |---|---|
 | `job.json` | Versioned request: name, backend/model, cwd, deadline, initial waiting mode, verified Pi capacities, owner session/tool call/branch anchor |
-| `task.md` | The plain task (without the child notice), kept for `/agents` |
+| `task.md` | The plain task (without the child notice), retained in the job directory |
 | `status.json` | State, supervisor/child PID and start time, bounded activity snapshot with latest-call tokens and capacity, cumulative usage, terminal reason |
 | `cancel.request`, `marker.*` | Cancellation request; notified/delivered/usage-delivered/acknowledged/backgrounded markers |
 | `child/<name>.*/` | The agent-spawn job: `events.jsonl`, `stderr.log`, `pid`, `exit.status`, `final-response.md` |
@@ -421,3 +419,8 @@ they do not make model calls. The fixture's `tmux` targets a private server and
 passes `PATH` and `AGENT_TASK_TEST_CASE` to each new session, because tmux sessions
 inherit the server's environment rather than the launching client's. Interactive rendering and live-provider calls
 still need a manual smoke test.
+
+The registry-only `/agents` browser no longer exposes job controls or results.
+Use `jobs` for inspection/results/cancellation and the shortcut above for
+foreground-to-background transitions. Job tracking and spawning are separate
+from the registry browser.
