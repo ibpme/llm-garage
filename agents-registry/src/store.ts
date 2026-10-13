@@ -2,7 +2,7 @@ import type { AgentSnapshot, DiscoveryResult, ProcessInfo, PublishMessage } from
 
 type Stamp = { at: number; priority: number };
 interface Entry { row: AgentSnapshot; clocks: Map<string, Stamp> }
-const key = (row: Pick<AgentSnapshot, 'provider' | 'process'>): string => JSON.stringify([row.provider, row.process.pid, row.process.startedAt]);
+const key = (row: Pick<AgentSnapshot, 'harness' | 'process'>): string => JSON.stringify([row.harness, row.process.pid, row.process.startedAt]);
 
 export class AgentStore {
   private readonly entries = new Map<string, Entry>();
@@ -13,7 +13,7 @@ export class AgentStore {
     const id = key(row);
     let entry = this.entries.get(id);
     if (!entry) {
-      entry = { row: { schemaVersion: 1, provider: row.provider, process: { ...row.process }, observedAt: row.observedAt,
+      entry = { row: { schemaVersion: 1, harness: row.harness, process: { ...row.process }, observedAt: row.observedAt,
         session: { mode: 'unknown' }, activity: { state: 'unknown', source: 'process-only' } }, clocks: new Map() };
       this.entries.set(id, entry);
     }
@@ -43,7 +43,7 @@ export class AgentStore {
     for (const [id, entry] of this.entries) {
       if (entry.row.process.pid === live.pid && entry.row.process.startedAt !== live.startedAt) this.entries.delete(id);
     }
-    const entry = this.entry({ schemaVersion: 1, provider: message.provider, process: message.process, observedAt: receivedAt,
+    const entry = this.entry({ schemaVersion: 1, harness: message.harness, process: message.process, observedAt: receivedAt,
       session: { mode: 'unknown' }, activity: { state: 'unknown', source: 'process-only' } });
     entry.row.observedAt = Math.max(entry.row.observedAt, receivedAt);
     const at = message.reportedAt;
@@ -100,6 +100,6 @@ export class AgentStore {
         delete copy.activity.waitingFor;
       }
       return copy;
-    }).sort((a, b) => a.provider.localeCompare(b.provider) || a.process.pid - b.process.pid || a.process.startedAt - b.process.startedAt);
+    }).sort((a, b) => a.harness.localeCompare(b.harness) || a.process.pid - b.process.pid || a.process.startedAt - b.process.startedAt);
   }
 }

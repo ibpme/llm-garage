@@ -9,7 +9,7 @@ import { request } from '../src/client.js';
 import type { DiscoveryResult, PublishMessage } from '../src/types.js';
 const processInfo = { pid: 101, startedAt: 100, ppid: 1, command: 'pi', args: 'pi' };
 const discovery = (): DiscoveryResult => ({ observedAt: Date.now(), processes: new Map([[101, processInfo]]), agents: [], errors: [], successfulTmuxServers: [] });
-const publish = (): PublishMessage => ({ version: 1, type: 'publish', provider: 'pi', process: { pid: 101, startedAt: processInfo.startedAt }, source: 'pi', reportedAt: Date.now(), patch: { activity: { state: 'busy' }, session: { cwd: '/repo' } } });
+const publish = (): PublishMessage => ({ version: 1, type: 'publish', harness: 'pi', process: { pid: 101, startedAt: processInfo.startedAt }, source: 'pi', reportedAt: Date.now(), patch: { activity: { state: 'busy' }, session: { cwd: '/repo' } } });
 
 async function directory(): Promise<string> { return mkdtemp(join(tmpdir(), 'ar-')); }
 

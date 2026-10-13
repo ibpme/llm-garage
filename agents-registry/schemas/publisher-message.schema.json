@@ -12,7 +12,7 @@
         "type": {
           "const": "publish"
         },
-        "provider": {
+        "harness": {
           "enum": [
             "pi",
             "claude"
@@ -157,7 +157,7 @@
       "required": [
         "version",
         "type",
-        "provider",
+        "harness",
         "process",
         "source",
         "reportedAt",
@@ -167,7 +167,7 @@
         {
           "if": {
             "properties": {
-              "provider": {
+              "harness": {
                 "const": "pi"
               }
             }

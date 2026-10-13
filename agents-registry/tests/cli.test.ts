@@ -29,7 +29,7 @@ test('compiled CLI launches detached, publishes via stdin, reports status and st
     assert.notEqual(health.pid, process.pid);
     assert.match((await run('start', '--background')).stdout, /already running/i);
     const info = (await listProcesses()).get(process.pid)!;
-    const payload = { version: 1, type: 'publish', provider: 'pi', source: 'pi', process: { pid: info.pid, startedAt: info.startedAt }, reportedAt: Date.now(), patch: { activity: { state: 'idle' }, session: { name: 'Integration', cwd: '/repo' } } };
+    const payload = { version: 1, type: 'publish', harness: 'pi', source: 'pi', process: { pid: info.pid, startedAt: info.startedAt }, reportedAt: Date.now(), patch: { activity: { state: 'idle' }, session: { name: 'Integration', cwd: '/repo' } } };
     const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((done, reject) => {
       const child = spawn(process.execPath, [cli, 'publish', '--directory', directory], { env });
       let stdout = '', stderr = '';

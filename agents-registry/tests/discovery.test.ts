@@ -26,7 +26,7 @@ test('joins only live agents and chooses the nearest pane ancestry across config
   const pi = result.agents.find(a => a.process.pid === 101)!;
   assert.equal(pi.pane?.server, '/tmp/inner');
   assert.equal(pi.activity.state, 'unknown');
-  const cc = result.agents.find(a => a.provider === 'claude')!;
+  const cc = result.agents.find(a => a.harness === 'claude')!;
   assert.equal(cc.activity.state, 'waiting');
   assert.equal(cc.activity.waitingFor, 'permission');
   assert.equal(cc.session.id, 'session-1');

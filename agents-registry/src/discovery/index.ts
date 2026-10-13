@@ -24,7 +24,7 @@ export async function discover(options: { tmuxServers: string[]; runner?: Runner
   const panes = paneResults.flat();
   for (const info of processes.values()) {
     if (!isPi(info)) continue;
-    result.agents.push({ schemaVersion: 1, provider: 'pi', observedAt: result.observedAt,
+    result.agents.push({ schemaVersion: 1, harness: 'pi', observedAt: result.observedAt,
       process: { pid: info.pid, startedAt: info.startedAt }, session: { mode: isInteractive(info) ? 'interactive' : 'non-interactive' },
       activity: { state: 'unknown', source: 'process-only' } });
   }
@@ -33,7 +33,7 @@ export async function discover(options: { tmuxServers: string[]; runner?: Runner
     if (!info) continue;
     const rawState = session.status ?? session.state;
     const state: ActivityState = rawState === 'busy' || rawState === 'waiting' || rawState === 'idle' ? rawState : 'unknown';
-    result.agents.push({ schemaVersion: 1, provider: 'claude', observedAt: result.observedAt,
+    result.agents.push({ schemaVersion: 1, harness: 'claude', observedAt: result.observedAt,
       process: { pid: info.pid, startedAt: info.startedAt },
       session: { id: session.sessionId, name: session.name, cwd: session.cwd, mode: session.kind === 'background' ? 'background' : isInteractive(info) ? 'interactive' : 'non-interactive' },
       activity: { state, rawState, waitingFor: state === 'waiting' ? session.waitingFor : undefined, source: 'claude-cli' } });

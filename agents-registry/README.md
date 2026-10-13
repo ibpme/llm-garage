@@ -154,7 +154,7 @@ still revalidate identity and pane ancestry before taking an action.
 
 ### Identity and liveness
 
-An agent's key is **provider + PID + process start time**. Session IDs are metadata,
+An agent's key is **harness + PID + process start time**. Session IDs are metadata,
 not unique process identities. All timestamps in snapshots, publisher messages,
 and health records are **Unix epoch milliseconds as non-negative safe integers**.
 
@@ -234,7 +234,7 @@ Example publication shape (replace the identity and timestamp with actual values
 {
   "version": 1,
   "type": "publish",
-  "provider": "pi",
+  "harness": "pi",
   "process": {
     "pid": 12345,
     "startedAt": 1791367200000
@@ -258,6 +258,12 @@ Example publication shape (replace the identity and timestamp with actual values
   }
 }
 ```
+
+The top-level `harness` identifies the agent harness (`pi` or `claude`);
+`model.provider` identifies the model provider (for example, `anthropic`).
+The former top-level `provider` field is no longer accepted. Update publishers
+and readers, then rebuild and restart an existing writer to regenerate snapshots.
+Schema and message versions remain `1`.
 
 Sources are `pi`, `claude-hook`, and `claude-statusline`. Pi must use source `pi`;
 Claude must use a Claude source. The status-line source cannot publish activity.

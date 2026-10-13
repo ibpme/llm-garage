@@ -5,10 +5,10 @@ import type { AgentSnapshot, ProcessInfo, PublishMessage } from '../src/types.js
 
 const identity = { pid: 101, startedAt: 100 };
 const processInfo: ProcessInfo = { ...identity, ppid: 1, command: 'pi', args: 'pi' };
-const agent = (): AgentSnapshot => ({ schemaVersion: 1, provider: 'pi', observedAt: 1000,
+const agent = (): AgentSnapshot => ({ schemaVersion: 1, harness: 'pi', observedAt: 1000,
   process: identity, session: { mode: 'interactive' }, activity: { state: 'unknown', source: 'process-only' } });
 const message = (at: number, patch: PublishMessage['patch']): PublishMessage => ({
-  version: 1, type: 'publish', provider: 'pi', process: identity, source: 'pi', reportedAt: at, patch,
+  version: 1, type: 'publish', harness: 'pi', process: identity, source: 'pi', reportedAt: at, patch,
 });
 
 test('publishing preserves independent fields and rejects older group updates', () => {
@@ -62,8 +62,8 @@ test('failed ps discovery retains rows and failed tmux discovery retains the pan
 test('discovery captured before a hook cannot overwrite the newer activity', () => {
   const store = new AgentStore();
   const claudeProcess = { ...processInfo, command: 'claude' };
-  store.publish({ ...message(2000, { activity: { state: 'busy' } }), provider: 'claude', source: 'claude-hook' }, claudeProcess, 2000);
-  store.reconcile({ observedAt: 1500, processes: new Map([[101, claudeProcess]]), agents: [{ ...agent(), provider: 'claude', observedAt: 1500, activity: { state: 'idle', source: 'claude-cli' } }], errors: [], successfulTmuxServers: [] });
+  store.publish({ ...message(2000, { activity: { state: 'busy' } }), harness: 'claude', source: 'claude-hook' }, claudeProcess, 2000);
+  store.reconcile({ observedAt: 1500, processes: new Map([[101, claudeProcess]]), agents: [{ ...agent(), harness: 'claude', observedAt: 1500, activity: { state: 'idle', source: 'claude-cli' } }], errors: [], successfulTmuxServers: [] });
   assert.equal(store.snapshot(2100)[0]!.activity.state, 'busy');
   assert.equal(store.snapshot(2100)[0]!.observedAt, 2000);
 });
