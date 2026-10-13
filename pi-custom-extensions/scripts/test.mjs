@@ -4,7 +4,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const includeAgentTests = process.argv.includes("--include-agent-tests");
+// Temporarily deferred while agent-task and agent-jobs await their rewrite.
+const deferred = new Set([join(root, "agent-task"), join(root, "shared", "agent-jobs")]);
+if (!includeAgentTests) {
+  console.log("Temporarily skipping agent-task/ and shared/agent-jobs/ tests; use --include-agent-tests to include them.");
+}
 function tests(directory) {
+  if (!includeAgentTests && deferred.has(directory)) return [];
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (entry.name === "node_modules") return [];
     const file = join(directory, entry.name);

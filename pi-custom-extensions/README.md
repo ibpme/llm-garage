@@ -291,7 +291,7 @@ bun run typecheck
 
 This runs `tsc --noEmit` against all `.ts` files in this directory.
 
-Run all tests and architectural checks:
+Run the currently enabled tests and architectural checks:
 
 ```bash
 bun run check
@@ -300,14 +300,25 @@ bun run check
 Or run them independently:
 
 ```bash
-bun run test                 # Colocated .test.ts files through Node's test runner
+bun run test                 # Enabled .test.ts files through Node's test runner
 bun run check:architecture   # Entry-point boundaries and runtime import cycles
 bun run test:loading         # Manifest discovery and imports; no model calls
 ```
 
-On some macOS machines the agent-task integration tests time out when launched
-through `bun run` (process launches stall for seconds). Run the suite directly
-with `node scripts/test.mjs` there; it runs test files one at a time.
+Tests under `agent-task/` and `shared/agent-jobs/` are temporarily excluded
+from `bun run test` and `bun run check` while those modules await a rewrite.
+The test files and production code remain unchanged. The runner announces the
+exclusions so a passing default run is not mistaken for full-suite coverage.
+Explicitly include the deferred tests with:
+
+```bash
+bun run test --include-agent-tests
+# Or invoke the serial Node runner directly:
+node scripts/test.mjs --include-agent-tests
+```
+
+On some macOS machines the agent-task process integration tests stall or time
+out. They are not part of the default iteration loop for now.
 
 Tests cover tool selection and SAFE masking, remote integration in both startup
 orders, cross-import services, guards, pure parsing/formatting/accounting, and the
