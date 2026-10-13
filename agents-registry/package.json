@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "npm run build && tsx --test tests/*.test.ts",
+    "test": "npm run build && tsx --test tests/*.test.ts tests/*.test.mjs",
     "start": "node dist/cli.js",
     "dev": "tsx src/cli.ts"
   },

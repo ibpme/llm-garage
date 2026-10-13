@@ -8,8 +8,9 @@ This is a current-state snapshot, not an append-only event log. It has no Pi SDK
 dependency and does not require an open Pi session. Nothing is installed by the
 repository's sync scripts. The optional Pi publisher below is included in the
 existing Pi extension package; it does not start or install the daemon. This
-version does not change the agents extension, install Claude hooks, or configure
-OS startup.
+version does not change the agents extension or configure OS startup. Claude
+hooks and status-line model publishing have separate opt-in installers; neither
+is enabled automatically.
 
 ## Install and build
 
@@ -98,7 +99,7 @@ claude agents --json ─┐
 ps process snapshot ─┼─ discovery ────┐
 configured tmux ─────┘                │
                                      ▼
-Pi publisher / future Claude hooks ── Unix socket ── registry store
+Optional Pi / Claude publishers ───── Unix socket ── registry store
                                                  │
                                           atomic replacement
                                                  │
@@ -116,8 +117,8 @@ published state or resurrect a replaced PID lifetime.
 
 Tmux does not send lifecycle or model events to the daemon. Pane creation,
 movement, and termination are detected by the next discovery scan. Pi/Claude
-publishing is a separate input; Pi uses the publisher below, while Claude hook
-and status-line publication remain future integrations.
+publishing is a separate, optional input through the publishers below. Claude
+CLI discovery works without hooks or status-line publication.
 
 ```mermaid
 flowchart TD
@@ -138,7 +139,7 @@ flowchart TD
     JOIN --> PICK["Choose nearest matching pane<br/>Tie-break: server path, then pane ID"]
     PICK --> OBS["Discovery observations<br/>Optional singular pane with server identity"]
 
-    FUTURE["Pi publisher events, future Claude hooks,<br/>and status-line publications"] -.-> SOCKET["Private registry Unix socket"]
+    PUBLISHERS["Optional Pi events, Claude hooks,<br/>and Claude status-line metadata"] --> SOCKET["Private registry Unix socket"]
     SOCKET --> VERIFY["Validate message and verify live PID/start time"]
     VERIFY --> STORE["Serialized registry merge"]
     OBS --> STORE
@@ -246,6 +247,141 @@ process removal, rather than a publisher deleting a row on session changes.
 This adds no tools, commands, agent browser, task delegation, Claude hooks, legacy
 registry-file writes, or daemon management. `pi-custom-extensions/agents/` and
 `pi-custom-extensions/agent-task/` are unchanged and are not runtime dependencies.
+
+## Optional Claude main hook publisher
+
+**Disabled by default.** Claude discovery uses `claude agents --json` and `ps`
+without this hook. Building or starting the registry, or running repository sync,
+does not install or enable it. No hook configuration is required for normal use.
+
+Enable it only if you want event-driven updates between discovery scans (five
+seconds apart by default) or the transcript path. Most published fields overlap
+with CLI discovery. Hook activity is inferred, and a newer CLI observation can
+replace it; the hook is not an authoritative or permanently preferred source.
+
+[`publishers/claude/hook.mjs`](publishers/claude/hook.mjs) receives Claude Code
+command-hook JSON on stdin and publishes activity/session metadata with source
+`claude-hook`. **It does not publish model metadata or touch the status line.**
+
+To explicitly enable it, build the registry first, start its daemon separately,
+then run the installer from this directory:
+
+```bash
+node publishers/claude/install.mjs
+# Use a different settings file (also supports project settings):
+node publishers/claude/install.mjs --settings /absolute/path/to/settings.json
+# Remove just this integration:
+node publishers/claude/install.mjs --uninstall
+```
+
+The default settings file is `$CLAUDE_CONFIG_DIR/settings.json`, otherwise
+`~/.claude/settings.json`. Installation is idempotent, creates missing settings,
+and adds handlers without replacing existing hooks or unrelated settings.
+`statusLine` is left unchanged. The installer records recovery information and
+the original settings in `<settings>.agents-registry-hooks.json` with mode `0600`.
+Uninstall removes only handlers with the installed command, preserving later
+settings and other hooks; it does not restore the whole saved settings file.
+Settings symlinks are refused: pass their source file explicitly. Installation
+is not part of sync/unsync and does not start the daemon. Restart Claude Code or
+review `/hooks` to ensure the new hook configuration is loaded.
+
+The installer uses the current Node executable and an absolute path to the hook;
+keep both paths available. The hook imports the built `dist/` client and process
+parser. An unbuilt/moved installation silently skips publication. Claude must
+inherit the same runtime directory configuration as the daemon:
+`AGENTS_REGISTRY_DIR`, then `XDG_STATE_HOME`, then `~/.local/state/agents-registry`.
+
+| Hook event | Activity |
+| --- | --- |
+| `SessionStart`, `Stop` | `idle` |
+| `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure` | `busy` |
+| `PreToolUse` for `AskUserQuestion` | `waiting`, reason `user_input` |
+| `PermissionRequest`, `Notification` of type `permission_prompt` | `waiting`, reason `permission` |
+| `Notification` of type `idle_prompt` | `waiting`, reason `idle_prompt` |
+| `SessionEnd` | `unknown`; discovery handles process removal |
+
+Other events/notifications and inputs identifying a subagent (`agent_id`) are
+ignored. `SubagentStop` does not mark the main Claude process idle. Session fields
+are ID, transcript path, and cwd when valid; omitted fields are left alone. No
+prompt text, tool arguments/results, notification messages, or model data are
+forwarded. The event name is retained as `activity.rawState`.
+
+Identity is the nearest verified Claude ancestor in a `TZ=UTC LC_ALL=C ps`
+snapshot, including an intervening shell. Native `claude` processes and Node
+running the standard npm `@anthropic-ai/claude-code/cli.js` entrypoint are
+recognized. Missing/unrecognized ancestry skips publication; session IDs are
+never used to guess a PID. The daemon separately verifies the PID/start time.
+
+Hooks run synchronously to avoid detached-hook reparenting and delayed event
+reordering, but are best-effort: process observation times out after one second
+and the socket request after 500 ms. They always exit successfully and print no
+output, including when the registry is absent or rejects an update. stdin has
+an 8 MiB limit; over-limit inputs are skipped rather than partially published.
+
+**Activity is an observation, not an authoritative turn state.** Another Stop
+hook can prevent completion after this hook reports idle. There is no heartbeat:
+a long turn or permission wait can exceed the default 20-second activity TTL,
+after which activity can become `unknown` unless refreshed by discovery or a
+new hook event. After a daemon restart, session metadata is republished on the
+next hook invocation. The hook adds no persistent worker or status-line publisher.
+
+## Optional Claude status-line model publisher
+
+**Disabled by default and independent of the hook publisher.** This integration
+wraps an existing command status line; it does not replace your renderer or
+install a default one. Build the registry and start its daemon separately, then
+explicitly opt in from this directory:
+
+```bash
+node publishers/claude/install-statusline.mjs
+node publishers/claude/install-statusline.mjs --settings /absolute/path/to/settings.json
+node publishers/claude/install-statusline.mjs --uninstall
+```
+
+The settings path defaults to `$CLAUDE_CONFIG_DIR/settings.json`, otherwise
+`~/.claude/settings.json`. An existing non-empty `statusLine.command` with
+`type: "command"` is required. Installation changes only that command, preserving
+padding, refresh settings, hooks, and unrelated configuration. It uses the current
+Node executable and an absolute wrapper path; keep both paths available.
+Installation is idempotent and is not part of sync/unsync or daemon startup.
+Restart Claude Code to ensure it loads the new command.
+
+Recovery information is stored in `<settings>.agents-registry-statusline.json`
+with mode `0600`. Uninstall restores only the original renderer command and
+preserves later settings. If the command has been replaced with another renderer,
+install/uninstall refuses to overwrite it. Settings and backup symlinks are refused;
+use the settings source file explicitly. A retained backup lets a repeated install
+or uninstall complete an interrupted settings write.
+
+[`publishers/claude/statusline-wrapper.mjs`](publishers/claude/statusline-wrapper.mjs)
+streams the original stdin bytes to the renderer and preserves its stdout, stderr,
+exit status, and cancellation signals (forwarded to the renderer process group).
+Rendering starts immediately, independently of process observation and socket
+latency. A bounded copy of stdin is used for metadata; inputs over 8 MiB are still
+forwarded in full but are not published.
+
+Each invocation publishes valid session ID, transcript path, cwd, and
+`model.id`/`model.display_name` (normalized to `displayName`) with source
+`claude-statusline`. No model provider is inferred. Missing/invalid fields are
+omitted; an explicit `model: null` clears the model. Activity, usage/cost,
+prompts, and messaging endpoints are never published. Usage is not currently
+supported by the registry schemas.
+
+Like the hook, it identifies the nearest native/npm Claude ancestor through
+`TZ=UTC LC_ALL=C ps`, never the wrapper PID or a session-ID lookup. Missing
+identity, malformed/subagent inputs, unavailable builds, and socket failures
+silently skip publication without affecting rendering. Process observation times
+out after one second and socket requests after 500 ms. The wrapper remains alive
+until rendering and the bounded publication attempt finish; telemetry can delay
+final command completion, but not renderer output. Cancellation stops the wrapper
+without waiting for telemetry.
+
+The wrapper imports the built `dist/` client and process parser. Claude must
+inherit the same runtime-directory environment as the daemon (`AGENTS_REGISTRY_DIR`,
+then `XDG_STATE_HOME`, then `~/.local/state/agents-registry`). There is no heartbeat:
+model/session metadata is republished on the next Claude status-line invocation,
+including after daemon restarts. This is a socket publisher, not the legacy
+per-session-file wrapper under `pi-custom-extensions/agents/`.
 
 ## Publisher interface
 
@@ -368,6 +504,8 @@ npm run typecheck
 Tests cover normalized discovery, input validation, partial merges, stale activity,
 PID reuse, delayed scan ordering, concurrent publications, degraded discovery,
 private snapshot writes, socket limits, exclusive ownership, compiled CLI
-background lifecycle, and hard-crash recovery. CLI tests use a temporary runtime
-directory and a fixture Claude executable; they do not modify user settings or
-leave the registry running.
+background lifecycle, and hard-crash recovery. Claude publisher tests cover
+ancestor identity, normalized metadata, renderer byte/exit/signal passthrough,
+registry/build failures, and opt-in installer recovery and conflict handling.
+CLI and publisher tests use temporary runtime/settings directories and fixture
+executables; they do not modify user settings or leave the registry running.
