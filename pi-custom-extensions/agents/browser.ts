@@ -2,7 +2,7 @@ import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-a
 import { Key, matchesKey, type OverlayOptions } from "@earendil-works/pi-tui";
 import type { AgentSnapshot, RegistryView } from "./reader.ts";
 import type { Origin, PaneAction, performPaneAction } from "./tmux-actions.ts";
-import { agentDescription, agentKey, agentLabel, clean, detailLines, frame, paneActionReason } from "./view.ts";
+import { agentGroup, agentKey, agentRow, sortAgents, clean, detailLines, frame, paneActionReason } from "./view.ts";
 
 export interface BrowserDependencies {
   readRegistry(): Promise<RegistryView>;
@@ -13,8 +13,8 @@ export interface BrowserDependencies {
 export function overlayOptions(terminal: { columns: number; rows: number }): OverlayOptions {
   return {
     anchor: "center", margin: 1,
-    get width() { return Math.max(1, terminal.columns < 90 ? terminal.columns - 2 : Math.min(120, Math.floor(terminal.columns * 0.85))); },
-    get maxHeight() { return Math.max(1, terminal.rows < 20 ? terminal.rows - 2 : Math.min(36, Math.floor(terminal.rows * 0.75))); },
+    get width() { return Math.max(1, terminal.columns - 2); },
+    get maxHeight() { return Math.max(1, terminal.rows - 2); },
   };
 }
 
@@ -39,9 +39,9 @@ export function createBrowser(
   const finish = () => { if (!closed) { closed = true; done(); } };
   const apply = (next: RegistryView) => {
     const key = view.agents[selected] ? agentKey(view.agents[selected]) : undefined;
-    view = next;
-    const index = next.agents.findIndex(agent => agentKey(agent) === key);
-    selected = index >= 0 ? index : Math.min(selected, Math.max(0, next.agents.length - 1));
+    view = { ...next, agents: sortAgents(next.agents, deps.origin) };
+    const index = view.agents.findIndex(agent => agentKey(agent) === key);
+    selected = index >= 0 ? index : 0;
     if (detail) detail = next.agents.find(agent => agentKey(agent) === agentKey(detail!)) ?? detail;
   };
   const refresh = async () => {
@@ -77,10 +77,11 @@ export function createBrowser(
   return {
     refresh,
     render(width: number): string[] {
-      const height = Math.max(1, terminal.rows < 20 ? terminal.rows - 2 : Math.min(36, Math.floor(terminal.rows * 0.75)));
+      const height = Math.max(1, terminal.rows - 2);
       const inner = Math.max(1, width - 4);
       page = Math.max(1, height - 6);
-      const title = theme.bold(`Agents · ${loading ? "Loading registry…" : view.state}`);
+      const healthTone = view.state === "fresh" ? "success" : view.state === "unavailable" ? "error" : "warning";
+      const title = theme.fg("accent", theme.bold("Agents")) + ` · ${theme.fg(healthTone, loading ? "Loading registry…" : view.state)} · ${theme.fg("muted", `${view.agents.length} sessions`)}`;
       const warning = error || view.warnings.join(" · ");
       let body: string[];
       if (detail) {
@@ -90,12 +91,21 @@ export function createBrowser(
         scroll = Math.max(0, Math.min(scroll, Math.max(0, lines.length - page)));
         body = lines.slice(scroll, scroll + page);
       } else {
-        offset = Math.max(0, Math.min(offset, selected, Math.max(0, view.agents.length - page)));
-        if (selected >= offset + page) offset = selected - page + 1;
-        body = view.agents.slice(offset, offset + page).map((agent, i) => {
-          const text = `${offset + i === selected ? "→" : " "} ${agentLabel(agent, deps.origin)} · ${agentDescription(agent)}`;
-          return offset + i === selected ? theme.fg("accent", text) : text;
+        const rows: Array<{ index?: number; text: string }> = [];
+        let group = "";
+        view.agents.forEach((agent, index) => {
+          const nextGroup = agentGroup(agent, deps.origin);
+          if (nextGroup !== group) {
+            group = nextGroup;
+            const count = view.agents.filter(item => agentGroup(item, deps.origin) === group).length;
+            rows.push({ text: theme.fg("accent", theme.bold(` ── ${group} · ${count} ──`)) });
+          }
+          rows.push({ index, text: agentRow(agent, index === selected, theme, deps.origin) });
         });
+        const selectedRow = Math.max(0, rows.findIndex(row => row.index === selected));
+        offset = Math.max(0, Math.min(offset, selectedRow, Math.max(0, rows.length - page)));
+        if (selectedRow >= offset + page) offset = selectedRow - page + 1;
+        body = rows.slice(offset, offset + page).map(row => row.text);
         if (!body.length) body = [loading ? "Loading registry…" : view.state === "unavailable" ? "Start agents-registry to browse live agents." : "No agents recorded."];
       }
       while (body.length < page) body.push("");
@@ -108,7 +118,7 @@ export function createBrowser(
           : `↑↓ navigate · Enter ${eligible ? "attach" : "details"} · i details${paneHints} · r refresh · q close`;
       const lines = height < 7
         ? pendingKill ? [` ${footer}`] : [warning ? theme.fg("warning", clean(warning)) : body[0], ` ${footer}`]
-        : [` ${title}`, ` ${theme.fg("warning", clean(warning))}`, ...body, ` ${footer}`];
+        : [` ${title}`, ` ${theme.fg("warning", clean(warning))}`, ...body, ` ${theme.fg(pendingKill ? "warning" : "muted", footer)}`];
       return frame(lines, width, height, theme);
     },
     handleInput(data: string): void {

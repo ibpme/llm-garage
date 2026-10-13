@@ -38,10 +38,10 @@ test("refresh preserves process selection across pane moves but not PID reuse", 
   browser.handleInput("j");
   setView({ ...fresh(), agents: [{ ...agents[1], pane: { ...agents[1].pane!, id: "%8" } }, agents[0]] });
   await browser.refresh();
-  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("PID 200")));
+  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("review")));
   setView({ ...fresh(), agents: [agents[0], { ...agents[1], process: { pid: 200, startedAt: now - 1000 } }] });
   await browser.refresh();
-  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("PID 100")));
+  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("main")));
   browser.dispose();
 });
 
@@ -91,7 +91,7 @@ test("details sanitizes terminal controls and back restores the selected list ro
   assert.ok(text.includes("Metadata"));
   assert.ok(!text.includes("\x1b"));
   browser.handleInput("\x1b");
-  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("PID 200")));
+  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("review")));
   browser.dispose();
 });
 
@@ -107,7 +107,7 @@ test("closing does not wait for an in-flight read or accept its late completion"
   resolve(fresh());
   await pending;
   assert.equal(renders, before);
-  assert.ok(!browser.render(100).join("\n").includes("PID 100"));
+  assert.ok(!browser.render(100).join("\n").includes("main"));
 });
 
 test("modal uses the injected terminal for resize and closes without waiting for registry", async () => {
@@ -117,7 +117,7 @@ test("modal uses the injected terminal for resize and closes without waiting for
   let component!: ReturnType<typeof createBrowser>;
   const ctx = { ui: { custom: (factory: any, options: any) => new Promise<void>(resolve => {
     component = factory({ terminal, requestRender() {} }, theme, {}, resolve);
-    assert.equal(options.overlayOptions().width, 102);
+    assert.equal(options.overlayOptions().width, 118);
     terminal.columns = 60;
     assert.equal(options.overlayOptions().width, 58);
     component.handleInput("q");
@@ -126,7 +126,7 @@ test("modal uses the injected terminal for resize and closes without waiting for
   resolveRead(fresh());
   await tick();
   assert.equal(reads, 1);
-  assert.ok(!component.render(80).join("\n").includes("PID 100"));
+  assert.ok(!component.render(80).join("\n").includes("main"));
 });
 
 test("other-server and old per-agent observations stay read-only", async () => {
@@ -161,5 +161,86 @@ test("footer does not offer moving or killing the invoking pane", async () => {
   assert.ok(!browser.render(120).join("\n").includes("Ctrl+X kill"));
   browser.handleInput("j");
   assert.ok(browser.render(120).join("\n").includes("Ctrl+X kill"));
+  browser.dispose();
+});
+
+test("browser fills large terminals without a size cap", async () => {
+  const { browser, terminal } = setup();
+  terminal.columns = 220;
+  terminal.rows = 70;
+  await browser.refresh();
+  assert.equal(browser.render(218).length, 68);
+  browser.dispose();
+});
+
+test("list hides process and pane identifiers while details retains them", async () => {
+  const { browser } = setup();
+  await browser.refresh();
+  const text = browser.render(100).join("\n");
+  assert.ok(!text.includes("PID 100"));
+  assert.ok(!text.includes("session:0.0 %0"));
+  browser.handleInput("i");
+  const details = browser.render(100).join("\n");
+  assert.ok(details.includes("PID: 100"));
+  assert.ok(details.includes("session:0.0 %0"));
+  browser.dispose();
+});
+
+test("current session is pinned above groups sorted waiting, busy, idle, unknown", async () => {
+  const { browser, setView } = setup();
+  let nextPid = 300;
+  const row = (name: string, state: AgentSnapshot["activity"]["state"], tmux = true): AgentSnapshot => ({
+    ...agents[1], process: { pid: nextPid++, startedAt: now },
+    session: { mode: tmux ? "interactive" : "background", name },
+    activity: { state, source: "pi-registry" }, pane: tmux ? agents[1].pane : undefined,
+  });
+  setView({ ...fresh(), agents: [row("non-idle", "idle", false), row("tmux-unknown", "unknown"), row("tmux-idle", "idle"), row("non-busy", "busy", false), row("tmux-busy", "busy"), { ...agents[0], activity: { state: "unknown", source: "pi-registry" } }, row("tmux-waiting", "waiting")] });
+  await browser.refresh();
+  const lines = browser.render(120);
+  const labels = ["main", "Interactive (tmux)", "tmux-waiting", "tmux-busy", "tmux-idle", "tmux-unknown", "Non-tmux", "non-busy", "non-idle"];
+  const positions = labels.map(label => lines.findIndex(line => line.includes(label)));
+  assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])), JSON.stringify(positions));
+  browser.handleInput("j");
+  assert.ok(browser.render(120).some(line => line.includes("→") && line.includes("tmux-waiting")));
+  browser.dispose();
+});
+
+test("current Pi process is pinned even outside tmux", async () => {
+  const current = { ...agents[1], process: { pid: process.pid, startedAt: now }, pane: undefined };
+  const browser = createBrowser({ readRegistry: async () => ({ ...fresh(), agents: [agents[0], current] }), performPaneAction: async () => {} }, { columns: 100, rows: 30 }, theme, () => {}, () => {});
+  await browser.refresh();
+  assert.ok(browser.render(100).some(line => line.includes("→") && line.includes("review") && line.includes("current")));
+  browser.dispose();
+});
+
+test("status, group headings and selected rows use semantic styling", async () => {
+  const tones = new Set<string>();
+  const browser = createBrowser({ readRegistry: async () => fresh(), origin: { server: "/socket", paneId: "%0" }, performPaneAction: async () => {} }, { columns: 100, rows: 30 }, { fg: (tone, text) => { tones.add(tone); return text; }, bold: text => text }, () => {}, () => {});
+  await browser.refresh();
+  browser.render(100);
+  assert.ok(tones.has("success"));
+  assert.ok(tones.has("muted"));
+  assert.ok(tones.has("accent"));
+  browser.dispose();
+});
+
+test("non-tmux and all non-interactive modes share one group, even with a mapped pane", async () => {
+  const { browser, setView } = setup();
+  const modes: AgentSnapshot["session"]["mode"][] = ["interactive", "non-interactive", "background", "unknown"];
+  const grouped = modes.map((mode, index): AgentSnapshot => ({
+    ...agents[1], process: { pid: 500 + index, startedAt: now },
+    session: { mode, name: `grouped-${mode}` },
+    pane: mode === "interactive" ? undefined : agents[1].pane,
+  }));
+  setView({ ...fresh(), agents: [agents[1], ...grouped] });
+  await browser.refresh();
+  const lines = browser.render(120);
+  const groupIndex = lines.findIndex(line => line.includes("Non-tmux"));
+  assert.ok(groupIndex >= 0);
+  assert.equal(lines.filter(line => line.includes("Non-tmux")).length, 1);
+  for (const agent of grouped) {
+    assert.ok(lines.findIndex(line => line.includes(agent.session.name!)) > groupIndex);
+  }
+  assert.ok(lines.findIndex(line => line.includes("review")) < groupIndex);
   browser.dispose();
 });

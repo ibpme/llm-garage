@@ -16,12 +16,39 @@ export function paneActionReason(view: RegistryView, agent: AgentSnapshot, origi
   return undefined;
 }
 
+export function isCurrentAgent(agent: AgentSnapshot, origin?: Origin): boolean {
+  return (agent.harness === "pi" && agent.process.pid === process.pid) ||
+    !!(agent.pane && origin && agent.pane.server === origin.server && agent.pane.id === origin.paneId);
+}
+
+export function agentGroup(agent: AgentSnapshot, origin?: Origin): string {
+  if (isCurrentAgent(agent, origin)) return "Current session";
+  return agent.session.mode === "interactive" && agent.pane ? "Interactive (tmux)" : "Non-tmux";
+}
+
+export function sortAgents(agents: AgentSnapshot[], origin?: Origin): AgentSnapshot[] {
+  const groups = ["Current session", "Interactive (tmux)", "Non-tmux"];
+  const states = ["waiting", "busy", "idle", "unknown"];
+  return [...agents].sort((a, b) =>
+    groups.indexOf(agentGroup(a, origin)) - groups.indexOf(agentGroup(b, origin)) ||
+    states.indexOf(a.activity.state) - states.indexOf(b.activity.state) ||
+    clean(a.session.name ?? "").localeCompare(clean(b.session.name ?? "")) ||
+    agentKey(a).localeCompare(agentKey(b)));
+}
+
 export function agentLabel(agent: AgentSnapshot, origin?: Origin): string {
-  const pane = agent.pane;
-  const current = pane && pane.server === origin?.server && pane.id === origin.paneId;
-  return clean(`${agent.harness === "pi" ? "Pi" : "Claude"}  ${agent.activity.state}  PID ${agent.process.pid}` +
-    (pane ? `  ${pane.sessionName}:${pane.windowIndex}.${pane.paneIndex} ${pane.id}` : `  ${agent.session.mode}`) +
-    (current ? " (current)" : "") + (!recentAgent(agent) ? " (stale)" : ""));
+  return `${agent.harness === "pi" ? "Pi" : "Claude"}  [${agent.activity.state}]` +
+    (isCurrentAgent(agent, origin) ? " (current)" : "") + (!recentAgent(agent) ? " (stale)" : "");
+}
+
+export function agentRow(agent: AgentSnapshot, selected: boolean, theme: Pick<Theme, "fg" | "bold">, origin?: Origin): string {
+  const tone = { waiting: "warning", busy: "accent", idle: "success", unknown: "dim" } as const;
+  const label = agentLabel(agent, origin);
+  const state = `[${agent.activity.state}]`;
+  const [before, after] = label.split(state);
+  return `${theme.fg("accent", selected ? "→" : " ")} ${theme.bold(theme.fg(selected ? "accent" : "text", before))}` +
+    theme.fg(tone[agent.activity.state], state) + theme.fg("muted", after) +
+    ` · ${theme.fg(selected ? "accent" : "muted", agentDescription(agent))}`;
 }
 
 export const agentDescription = (agent: AgentSnapshot): string => clean([

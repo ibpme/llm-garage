@@ -53,7 +53,15 @@ pi -e ./pi-custom-extensions/agents/index.ts
 | Escape, Ctrl+C, or `q` | Cancel confirmation, return from details, or close |
 
 The centered modal opens immediately and refreshes every two seconds. Its size
-adapts to the terminal. Selection follows harness + PID + numeric process start
+fills the terminal with a one-cell margin, including on large displays. The current
+session is pinned first, followed by **Interactive (tmux)** and **Non-tmux** groups.
+The Non-tmux group also includes every non-interactive, background, or unknown-mode
+agent, even when it has a mapped tmux pane. Only interactive agents with mapped
+panes belong to Interactive (tmux); the pinned current session is the exception.
+Within each group, sessions sort by **waiting → busy → idle → unknown**, then name.
+Status badges, section headings, selection, and registry health use theme colors.
+PID and tmux pane numbers are hidden in the list and remain available in details.
+Selection follows harness + PID + numeric process start
 time, independent of pane moves. Details show process identity, observation time,
 activity and source, session, working directory, model, and tmux server/location.
 Registry strings are sanitized before terminal rendering.
