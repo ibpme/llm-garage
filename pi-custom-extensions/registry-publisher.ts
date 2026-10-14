@@ -5,7 +5,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ProcessIdentity, PublishMessage } from "../agents-registry/src/types.ts";
+import type { MessagingEndpoint, ProcessIdentity, PublishMessage } from "../agents-registry/src/types.ts";
+import { LISTENER_CHANGED_EVENT, LISTENER_QUERY_EVENT, isListenerEndpoint } from "./contracts/listener.ts";
 
 const execute = promisify(execFile);
 
@@ -21,6 +22,13 @@ export default function (pi: ExtensionAPI): void {
   let sending = false;
   let socket: Socket | undefined;
   let reportedAt = 0;
+  let messaging: MessagingEndpoint | null = null;
+  let advertisedEndpoint = false;
+  const unsubscribeListener = pi.events.on(LISTENER_CHANGED_EVENT, value => {
+    if (!isListenerEndpoint(value)) return;
+    messaging = value;
+    if (active && context) publish(context);
+  });
 
   async function identify(): Promise<ProcessIdentity> {
     const { stdout } = await execute("ps", ["-p", String(process.pid), "-o", "lstart="], {
@@ -70,11 +78,13 @@ export default function (pi: ExtensionAPI): void {
     if (!active) return;
     context = ctx;
     if (!identity) return;
+    if (messaging) advertisedEndpoint = true;
     // Equal-priority duplicate timestamps keep the first value in the registry.
     reportedAt = Math.max(Date.now(), reportedAt + 1);
     pending = {
       version: 1, type: "publish", harness: "pi", source: "pi", process: identity, reportedAt,
       patch: {
+        messaging,
         session: {
           id: ctx.sessionManager.getSessionId(), file: ctx.sessionManager.getSessionFile() ?? null,
           name: ctx.sessionManager.getSessionName() ?? null, cwd: ctx.cwd,
@@ -109,6 +119,7 @@ export default function (pi: ExtensionAPI): void {
     context = undefined;
     identity = undefined;
     prompts = 0;
+    advertisedEndpoint = false;
     socket?.destroy();
     socket = undefined;
   }
@@ -118,11 +129,21 @@ export default function (pi: ExtensionAPI): void {
     active = true;
     context = ctx;
     directory = resolve(process.env.AGENTS_REGISTRY_DIR ?? join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "agents-registry"));
+    messaging = null;
+    pi.events.emit(LISTENER_QUERY_EVENT, undefined);
     refresh();
     heartbeat = setInterval(refresh, 5000);
     heartbeat.unref();
   });
-  pi.on("session_shutdown", stop);
+  pi.on("session_shutdown", async () => {
+    unsubscribeListener();
+    const clear: PublishMessage | undefined = advertisedEndpoint && identity ? {
+      version: 1, type: "publish", harness: "pi", source: "pi", process: identity,
+      reportedAt: Math.max(Date.now(), reportedAt + 1), patch: { messaging: null },
+    } : undefined;
+    stop();
+    if (clear) await request(clear);
+  });
   pi.on("session_info_changed", (_event, ctx) => { publish(ctx); });
   pi.on("model_select", (event, ctx) => { publish(ctx, event.model); });
   pi.on("before_agent_start", (_event, ctx) => { publish(ctx); });

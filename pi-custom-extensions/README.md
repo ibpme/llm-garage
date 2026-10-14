@@ -42,7 +42,8 @@ larger features use focused modules:
 | Feature | Responsibilities |
 |---|---|
 | `agents/` | Read-only registry snapshots/health, live-agent browser, verified tmux actions |
-| `registry-publisher.ts` | Best-effort Pi session/model/activity publication to the standalone agents-registry daemon; no browser or delegation |
+| `registry-publisher.ts` | Best-effort Pi session/model/activity and listener-endpoint publication to the standalone agents-registry daemon; no browser or delegation |
+| `message-listener/` | Private TUI Unix socket, validated messages/ACKs, `/listen`, footer status, endpoint events |
 | `agent-task/` | Agent task delegation to Pi/Claude, background job tools/indicator/notices, detached supervisor, JSON event tracking, tool rendering |
 | `prompt-suggestions/` | Registration, controller, config, context, generation, editor |
 | `questionnaire/` | Registration/reanswer workflow, model parsing, schemas, UI, tree compatibility |
@@ -102,6 +103,18 @@ and a five-second heartbeat, and silently tolerates an unavailable daemon. Start
 the daemon explicitly; loading this extension never starts it. Configure both
 with the same `AGENTS_REGISTRY_DIR` if overriding the default state directory.
 It is independent of `agents/` and `agent-task/` and does not change their behavior.
+
+## Message listener
+
+[`message-listener/`](message-listener/README.md) opens a private Unix socket in
+TUI sessions. `/listen` toggles it; `/listen on|off|status` provides explicit
+control. A footer badge shows whether it is listening. Versioned newline-JSON
+messages become user messages with sender/reply metadata and `steer` or `followUp`
+delivery. ACKs confirm handoff, not model completion; `replyTo` is metadata only.
+The independent registry publisher advertises endpoints, clears them when off,
+and refreshes them on its heartbeat. Start/rebuild the registry daemon separately;
+local listening works even when it is absent. See the feature README for protocol,
+security, retries, discovery, and a sender example.
 
 ## SSH and styled tools
 

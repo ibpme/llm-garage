@@ -27,6 +27,7 @@
       "./agents/index.ts",
       "./alias.ts",
       "./loaded-skills/index.ts",
+      "./message-listener/index.ts",
       "./permission-gate.ts",
       "./prompt-suggestions/index.ts",
       "./protected-paths.ts",

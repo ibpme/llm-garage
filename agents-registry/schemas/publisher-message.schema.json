@@ -148,6 +148,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "messaging": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/messaging"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [],
@@ -211,6 +221,27 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "harness": {
+                "const": "claude"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "patch": {
+                "not": {
+                  "required": [
+                    "messaging"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          }
         }
       ]
     },
@@ -240,6 +271,28 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "messaging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport",
+        "path",
+        "protocol"
+      ],
+      "properties": {
+        "transport": {
+          "const": "unix"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/",
+          "maxLength": 100
+        },
+        "protocol": {
+          "const": "pi-listener-v1"
+        }
+      }
     }
   }
 }

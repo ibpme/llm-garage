@@ -478,6 +478,35 @@ This transport trusts programs running as the same OS user. Process verification
 establishes liveness, not proof that the sender owns the claimed agent. There is
 no per-publisher authentication or messaging authorization. The ordinary snapshot
 contains no prompts, responses, credentials, or Claude messaging socket paths.
+Pi may explicitly advertise its private message-listener socket as described below.
+
+## Optional Pi messaging endpoint
+
+The [`message-listener` extension](../pi-custom-extensions/message-listener/README.md)
+opens a private Unix socket in TUI sessions. The existing Pi publisher advertises
+it through optional `patch.messaging`:
+
+```json
+{"transport":"unix","path":"/absolute/path/to/in.sock","protocol":"pi-listener-v1"}
+```
+
+Only source `pi` / harness `pi` may publish this field. `messaging: null` clears
+it; omission preserves it. The group has an independent report timestamp and
+clear tombstone, like model metadata. The snapshot's optional `messaging` field
+contains the endpoint plus `reportedAt`. Advertisements expire using the activity
+TTL (20 seconds by default), reflected on the next snapshot write. The Pi
+publisher refreshes them every five seconds and makes a bounded shutdown clear.
+
+This is endpoint discovery, **not message routing**: send messages directly to
+the advertised socket. The registry does not open, probe, authenticate, or send
+to that endpoint. Its process verification proves liveness, not endpoint
+ownership. Check registry health and process identity and handle connection
+failures. Missing registry service does not prevent the listener from operating.
+
+Rebuild/restart an existing daemon to support the additive field. The schema
+version stays `1`; older consumers using strict schemas must update before
+reading snapshots containing messaging endpoints. Claude publishers cannot
+advertise endpoints, and Claude's internal messaging paths remain undisclosed.
 
 ## Reader interface
 

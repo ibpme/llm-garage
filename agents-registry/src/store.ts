@@ -49,6 +49,10 @@ export class AgentStore {
     const at = message.reportedAt;
     const source = message.source === 'pi' ? 'pi-registry' : message.source;
     this.session(entry, message.patch.session, at, 2);
+    if ('messaging' in message.patch && this.accept(entry, 'messaging', at, 2)) {
+      if (message.patch.messaging) entry.row.messaging = { ...message.patch.messaging, reportedAt: at };
+      else delete entry.row.messaging;
+    }
     if (message.patch.activity && source !== 'claude-statusline' && this.accept(entry, 'activity', at, 2)) {
       entry.row.activity = { ...message.patch.activity, source, reportedAt: at };
     }
@@ -95,6 +99,7 @@ export class AgentStore {
   snapshot(now: number): AgentSnapshot[] {
     return [...this.entries.values()].map(({ row }) => {
       const copy = structuredClone(row);
+      if (copy.messaging && now - copy.messaging.reportedAt > this.activityTtlMs) delete copy.messaging;
       if (copy.activity.reportedAt !== undefined && now - copy.activity.reportedAt > this.activityTtlMs) {
         copy.activity.state = 'unknown';
         delete copy.activity.waitingFor;

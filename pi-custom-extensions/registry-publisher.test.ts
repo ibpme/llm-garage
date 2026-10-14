@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -25,7 +26,14 @@ async function setup(t: test.TestContext) {
   });
   await new Promise<void>(resolve => server.listen(join(directory, "registry.sock"), resolve));
   const handlers = new Map<string, (event: any, ctx: ExtensionContext) => unknown>();
-  extension({ on(name, handler) { handlers.set(name, handler as any); } } as ExtensionAPI);
+  const bus = new EventEmitter();
+  extension({
+    on(name: string, handler: Function) { handlers.set(name, handler as any); },
+    events: {
+      on(name: string, handler: (...args: any[]) => void) { bus.on(name, handler); return () => bus.off(name, handler); },
+      emit(name: string, value: unknown) { bus.emit(name, value); },
+    },
+  } as unknown as ExtensionAPI);
   let idle = true;
   let name: string | undefined = "Review";
   let file: string | undefined = "/sessions/one.jsonl";
@@ -49,7 +57,7 @@ async function setup(t: test.TestContext) {
     }
     assert.fail("No publication received");
   }
-  return { ctx, messages, fire, next, server, directory, set idle(value: boolean) { idle = value; }, clearSession() { name = undefined; file = undefined; } };
+  return { ctx, messages, fire, next, server, directory, bus, set idle(value: boolean) { idle = value; }, clearSession() { name = undefined; file = undefined; } };
 }
 
 test("publishes verified own identity and full metadata only after session startup", async t => {
@@ -134,4 +142,23 @@ test("an unavailable daemon does not block events and recovers on the next heart
   assert.equal(h.messages.length, 0);
   await new Promise<void>(resolve => h.server.listen(join(h.directory, "registry.sock"), resolve));
   assert.equal((await h.next(0)).patch.activity?.state, "busy");
+});
+
+test("queries listener state at startup and publishes changes and clearing", async t => {
+  const h = await setup(t);
+  const endpoint = { transport: "unix", path: "/tmp/pi-listen.sock", protocol: "pi-listener-v1" };
+  h.bus.on("message-listener:query", () => h.bus.emit("message-listener:changed", endpoint));
+  h.fire("session_start");
+  assert.deepEqual((await h.next(0)).patch.messaging, endpoint);
+  const count = h.messages.length;
+  h.bus.emit("message-listener:changed", null);
+  assert.equal((await h.next(count)).patch.messaging, null);
+});
+
+test("shutdown sends a bounded endpoint clear before abandoning publication", async t => {
+  const h = await setup(t);
+  h.bus.on("message-listener:query", () => h.bus.emit("message-listener:changed", { transport: "unix", path: "/tmp/pi.sock", protocol: "pi-listener-v1" }));
+  h.fire("session_start"); await h.next(0);
+  await h.fire("session_shutdown");
+  assert.equal(h.messages.at(-1)?.patch.messaging, null);
 });
