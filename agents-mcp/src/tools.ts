@@ -1,6 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { createMessaging, MessagingError } from './messaging.js';
+import type { MessagingOptions } from './messaging.js';
 
 const nonBlank = z.string().min(1).regex(/\S/, 'Must contain a non-whitespace character');
 const spawnFields = {
@@ -9,7 +11,9 @@ const spawnFields = {
 };
 
 export const sendMessageSchema = z.strictObject({
-  agent_id: nonBlank.describe('Opaque identifier of the recipient agent.'),
+  agent_id: nonBlank.max(256).describe('Recipient agent_id from list_agents; names are labels, not addresses.'),
+  message_id: nonBlank.max(256).optional().describe('Optional unique message ID. Reuse with identical payload for retry after an ambiguous failure.'),
+  deliver_as: z.enum(['steer', 'followUp']).optional().describe('Default followUp queues after the current turn; steer interrupts at the next steering boundary.'),
   message: nonBlank.describe('Message to deliver to the agent.'),
 });
 export const spawnAgentTaskSchema = z.strictObject({
@@ -40,13 +44,29 @@ function notImplemented(tool: string): CallToolResult {
   };
 }
 
-export function registerAgentTools(server: McpServer): void {
+export function registerAgentTools(server: McpServer, options: MessagingOptions = {}): void {
+  const messaging = createMessaging(options);
+  async function result(operation: () => Promise<Record<string, unknown>>): Promise<CallToolResult> {
+    try {
+      const output = await operation();
+      return { content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output };
+    } catch (error) {
+      const output = { error: { code: error instanceof MessagingError ? error.code : 'INTERNAL_ERROR', message: error instanceof Error ? error.message : 'Operation failed' } };
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify(output) }], structuredContent: output };
+    }
+  }
+  server.registerTool('list_agents', {
+    title: 'List live agents',
+    description: 'Discover live agents, their agent_id, display name, harness, working directory and messaging availability. Use agent_id, not the display name, to address messages. self_agent_id identifies the caller, or is null when unavailable.',
+    inputSchema: z.strictObject({}),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async () => result(() => messaging.listAgents()));
   server.registerTool('send_message', {
     title: 'Send a message to an agent',
-    description: 'Send a message to another agent identified by agent_id. Interface only; not implemented.',
+    description: 'Send a message to another agent identified by agent_id. Sender identity is supplied automatically so the receiver can address a reply. Success means accepted into the delivery queue, not completed or answered. Sender metadata is not authenticated.',
     inputSchema: sendMessageSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async () => notImplemented('send_message'));
+  }, async input => result(() => messaging.sendMessage(input)));
 
   server.registerTool('spawn_agent_task', {
     title: 'Spawn a non-interactive agent task',

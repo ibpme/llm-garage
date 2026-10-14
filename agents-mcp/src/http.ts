@@ -51,7 +51,12 @@ export async function startHttpServer(port = 3000): Promise<{ url: string; close
       return;
     }
 
-    const server = createAgentsServer();
+    const callerId = req.headers['x-agent-id'];
+    if (callerId !== undefined && (typeof callerId !== 'string' || callerId.length > 256 || !callerId.trim())) {
+      errorResponse(res, 400, 'Invalid X-Agent-Id');
+      return;
+    }
+    const server = createAgentsServer({ callerPid: null, ...(typeof callerId === 'string' ? { callerAgentId: callerId } : {}) });
     const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: randomUUID,
       onsessioninitialized: id => { sessions.set(id, { server, transport }); },

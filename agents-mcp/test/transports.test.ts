@@ -16,7 +16,7 @@ test('stdio CLI negotiates MCP and reserves stdout for protocol messages', async
   t.after(() => client.close());
   await client.connect(transport);
   assert.equal(client.getServerVersion()?.name, 'agents');
-  assert.equal((await client.listTools()).tools.length, 5);
+  assert.equal((await client.listTools()).tools.length, 6);
   assert.equal((await client.callTool({ name: 'list_agent_tasks', arguments: {} })).isError, true);
 });
 
@@ -41,7 +41,7 @@ test('HTTP creates separate MCP sessions and removes a terminated session', asyn
   t.after(async () => { for (const client of clients) await client.close(); });
   for (let i = 0; i < clients.length; i++) {
     await clients[i]!.connect(transports[i]!);
-    assert.equal((await clients[i]!.listTools()).tools.length, 5);
+    assert.equal((await clients[i]!.listTools()).tools.length, 6);
     assert.equal((await clients[i]!.callTool({ name: 'list_agent_tasks', arguments: {} })).isError, true);
   }
   assert.ok(transports[0]!.sessionId);
@@ -52,7 +52,7 @@ test('HTTP creates separate MCP sessions and removes a terminated session', asyn
     'mcp-session-id': oldSession, accept: 'text/event-stream',
   } });
   assert.equal(expired.status, 404);
-  assert.equal((await clients[1]!.listTools()).tools.length, 5);
+  assert.equal((await clients[1]!.listTools()).tools.length, 6);
 });
 
 test('HTTP validates session routing, Origin, and Host before serving MCP', async t => {

@@ -487,7 +487,7 @@ opens a private Unix socket in TUI sessions. The existing Pi publisher advertise
 it through optional `patch.messaging`:
 
 ```json
-{"transport":"unix","path":"/absolute/path/to/in.sock","protocol":"pi-listener-v1"}
+{"transport":"unix","path":"/absolute/path/to/in.sock","protocol":"pi-listener-v2"}
 ```
 
 Only source `pi` / harness `pi` may publish this field. `messaging: null` clears
@@ -503,7 +503,13 @@ to that endpoint. Its process verification proves liveness, not endpoint
 ownership. Check registry health and process identity and handle connection
 failures. Missing registry service does not prevent the listener from operating.
 
-Rebuild/restart an existing daemon to support the additive field. The schema
+Rebuild/restart the daemon and reload Pi's listener/publisher together to use
+`pi-listener-v2`. The listener now accepts an opaque content string within a
+minimal version-2 delivery envelope; MCP formats sender metadata into that text.
+The registry's strict endpoint schemas reject old `pi-listener-v1` advertisements.
+This does not change registry snapshot or publisher message versions.
+
+Rebuild/restart an existing daemon to support the messaging field. The schema
 version stays `1`; older consumers using strict schemas must update before
 reading snapshots containing messaging endpoints. Claude publishers cannot
 advertise endpoints, and Claude's internal messaging paths remain undisclosed.

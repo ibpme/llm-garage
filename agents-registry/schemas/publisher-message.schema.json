@@ -290,7 +290,7 @@
           "maxLength": 100
         },
         "protocol": {
-          "const": "pi-listener-v1"
+          "const": "pi-listener-v2"
         }
       }
     }

@@ -54,15 +54,16 @@ test('snapshot harness is distinct from model provider and rejects the legacy ag
 });
 
 test('only Pi can publish a versioned absolute Unix messaging endpoint', () => {
-  const endpoint = { transport: 'unix', path: '/tmp/pi.sock', protocol: 'pi-listener-v1' };
+  const endpoint = { transport: 'unix', path: '/tmp/pi.sock', protocol: 'pi-listener-v2' };
   const pi = { ...base, harness: 'pi', source: 'pi', patch: { messaging: endpoint } };
   assert.doesNotThrow(() => validateMessage(pi));
   assert.doesNotThrow(() => validateMessage({ ...pi, patch: { messaging: null } }));
-  for (const messaging of [{ ...endpoint, path: 'relative' }, { ...endpoint, transport: 'tcp' }, { ...endpoint, protocol: 'other' }, { ...endpoint, extra: true }]) {
+  for (const messaging of [{ ...endpoint, path: 'relative' }, { ...endpoint, transport: 'tcp' }, { ...endpoint, protocol: 'other' }, { ...endpoint, protocol: 'pi-listener-v1' }, { ...endpoint, extra: true }]) {
     assert.throws(() => validateMessage({ ...pi, patch: { messaging } }), /Invalid/);
   }
   assert.throws(() => validateMessage({ ...base, patch: { messaging: endpoint } }), /Invalid/);
   const row = { schemaVersion: 1, harness: 'pi', observedAt: 1000, process: { pid: 1, startedAt: 100 }, session: { mode: 'unknown' }, activity: { state: 'unknown', source: 'process-only' }, messaging: { ...endpoint, reportedAt: 1000 } };
   assert.doesNotThrow(() => validateSnapshot(row));
   assert.throws(() => validateSnapshot({ ...row, messaging: endpoint }), /Invalid/);
+  assert.throws(() => validateSnapshot({ ...row, messaging: { ...row.messaging, protocol: 'pi-listener-v1' } }), /Invalid/);
 });

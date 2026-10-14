@@ -146,7 +146,7 @@ test("an unavailable daemon does not block events and recovers on the next heart
 
 test("queries listener state at startup and publishes changes and clearing", async t => {
   const h = await setup(t);
-  const endpoint = { transport: "unix", path: "/tmp/pi-listen.sock", protocol: "pi-listener-v1" };
+  const endpoint = { transport: "unix", path: "/tmp/pi-listen.sock", protocol: "pi-listener-v2" };
   h.bus.on("message-listener:query", () => h.bus.emit("message-listener:changed", endpoint));
   h.fire("session_start");
   assert.deepEqual((await h.next(0)).patch.messaging, endpoint);
@@ -157,7 +157,7 @@ test("queries listener state at startup and publishes changes and clearing", asy
 
 test("shutdown sends a bounded endpoint clear before abandoning publication", async t => {
   const h = await setup(t);
-  h.bus.on("message-listener:query", () => h.bus.emit("message-listener:changed", { transport: "unix", path: "/tmp/pi.sock", protocol: "pi-listener-v1" }));
+  h.bus.on("message-listener:query", () => h.bus.emit("message-listener:changed", { transport: "unix", path: "/tmp/pi.sock", protocol: "pi-listener-v2" }));
   h.fire("session_start"); await h.next(0);
   await h.fire("session_shutdown");
   assert.equal(h.messages.at(-1)?.patch.messaging, null);

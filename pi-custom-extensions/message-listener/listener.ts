@@ -22,13 +22,13 @@ export async function startListener(deliver: (message: IncomingMessage) => void)
   let closePromise: Promise<void> | undefined;
   const server = createServer({ allowHalfOpen: true }, socket => {
     socket.on("error", () => socket.destroy());
-    if (closing || connections.size >= 32) { socket.end(`${JSON.stringify({ version: 1, type: "ack", id: null, ok: false, error: "Listener busy" })}\n`); socket.destroySoon(); return; }
+    if (closing || connections.size >= 32) { socket.end(`${JSON.stringify({ version: 2, type: "ack", id: null, ok: false, error: "Listener busy" })}\n`); socket.destroySoon(); return; }
     connections.add(socket);
     socket.on("close", () => connections.delete(socket));
     let chunks: Buffer[] = [];
     let bytes = 0;
     let done = false;
-    const timer = setTimeout(() => finish({ version: 1, type: "ack", id: null, ok: false, error: "Request timeout" }), 5000);
+    const timer = setTimeout(() => finish({ version: 2, type: "ack", id: null, ok: false, error: "Request timeout" }), 5000);
     timer.unref();
     socket.on("close", () => clearTimeout(timer));
     function finish(ack: Ack): void {
@@ -39,11 +39,11 @@ export async function startListener(deliver: (message: IncomingMessage) => void)
       socket.end(`${JSON.stringify(ack)}\n`);
       socket.destroySoon();
     }
-    socket.on("end", () => { if (!done) finish({ version: 1, type: "ack", id: null, ok: false, error: "Incomplete request; newline required" }); });
+    socket.on("end", () => { if (!done) finish({ version: 2, type: "ack", id: null, ok: false, error: "Incomplete request; newline required" }); });
     socket.on("data", (chunk: Buffer) => {
       if (done) return;
       bytes += chunk.length;
-      if (bytes > MAX_MESSAGE_BYTES) { finish({ version: 1, type: "ack", id: null, ok: false, error: "Request exceeds 64 KiB" }); return; }
+      if (bytes > MAX_MESSAGE_BYTES) { finish({ version: 2, type: "ack", id: null, ok: false, error: "Request exceeds 64 KiB" }); return; }
       chunks.push(chunk);
       if (!chunk.includes(10)) return;
       let id: string | null = null;
@@ -57,15 +57,15 @@ export async function startListener(deliver: (message: IncomingMessage) => void)
         const previous = accepted.get(id);
         if (previous !== undefined) {
           if (previous !== hash) throw new Error("Message id already used with different payload");
-          finish({ version: 1, type: "ack", id, ok: true, status: "duplicate" });
+          finish({ version: 2, type: "ack", id, ok: true, status: "duplicate" });
           return;
         }
         deliver(message);
         accepted.set(id, hash);
         if (accepted.size > 1024) accepted.delete(accepted.keys().next().value!);
-        finish({ version: 1, type: "ack", id, ok: true, status: "accepted" });
+        finish({ version: 2, type: "ack", id, ok: true, status: "accepted" });
       } catch (error) {
-        finish({ version: 1, type: "ack", id, ok: false, error: error instanceof SyntaxError ? "Invalid JSON" : error instanceof Error ? error.message : "Delivery failed" });
+        finish({ version: 2, type: "ack", id, ok: false, error: error instanceof SyntaxError ? "Invalid JSON" : error instanceof Error ? error.message : "Delivery failed" });
       }
     });
   });

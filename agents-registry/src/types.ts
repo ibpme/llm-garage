@@ -8,7 +8,7 @@ export interface Session { id?: string; file?: string; name?: string; cwd?: stri
 export interface Activity { state: ActivityState; rawState?: string; waitingFor?: string; source: 'pi-registry' | 'claude-cli' | 'claude-hook' | 'process-only'; reportedAt?: number }
 export interface Model { id: string; provider?: string; displayName?: string; source: 'pi-registry' | 'claude-statusline' | 'claude-hook'; reportedAt: number }
 export interface Pane { server: string; id: string; sessionId: string; sessionName: string; windowIndex: string; paneIndex: string; cwd: string }
-export interface MessagingEndpoint { transport: 'unix'; path: string; protocol: 'pi-listener-v1' }
+export interface MessagingEndpoint { transport: 'unix'; path: string; protocol: 'pi-listener-v2' }
 export interface AgentSnapshot { schemaVersion: 1; harness: Harness; observedAt: number; process: ProcessIdentity; session: Session; activity: Activity; model?: Model; pane?: Pane; messaging?: MessagingEndpoint & { reportedAt: number } }
 export interface PublishMessage {
   version: 1; type: 'publish'; harness: Harness; process: ProcessIdentity;

@@ -95,7 +95,7 @@ test('cleared model tombstone prevents a delayed model event from restoring it',
 
 test('messaging endpoints are timestamped, cleared with tombstones and expire without heartbeat', () => {
   const store = new AgentStore({ activityTtlMs: 20000 });
-  const endpoint = { transport: 'unix', path: '/tmp/pi.sock', protocol: 'pi-listener-v1' } as const;
+  const endpoint = { transport: 'unix', path: '/tmp/pi.sock', protocol: 'pi-listener-v2' } as const;
   store.publish(message(1000, { messaging: endpoint }), processInfo, 1000);
   assert.deepEqual(store.snapshot(1000)[0]!.messaging, { ...endpoint, reportedAt: 1000 });
   assert.equal(store.snapshot(21001)[0]!.messaging, undefined);

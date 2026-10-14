@@ -4,7 +4,7 @@ import { createConnection } from "node:net";
 import test from "node:test";
 
 import { startListener } from "./listener.ts";
-const message = { version: 1, type: "message", id: "one", from: { id: "sender", harness: "pi" }, replyTo: { transport: "unix", path: "/tmp/reply.sock" }, content: "Hello 🌏" };
+const message = { version: 2, type: "message", id: "one", content: "Hello 🌏" };
 function request(path: string, input: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
@@ -33,7 +33,7 @@ test("private socket accepts fragmented UTF-8 JSON and defaults to followUp", as
   const listener = await setup(t, value => received.push(value));
   assert.equal((await stat(listener.path)).mode & 0o777, 0o600);
   assert.equal((await stat(listener.directory)).mode & 0o777, 0o700);
-  assert.deepEqual(await request(listener.path, JSON.stringify(message) + "\n"), { version: 1, type: "ack", id: "one", ok: true, status: "accepted" });
+  assert.deepEqual(await request(listener.path, JSON.stringify(message) + "\n"), { version: 2, type: "ack", id: "one", ok: true, status: "accepted" });
   assert.deepEqual(received, [{ ...message, deliverAs: "followUp" }]);
   await listener.close();
   await assert.rejects(access(listener.path));
@@ -52,7 +52,7 @@ test("duplicate ids do not re-deliver; changed payloads with the same id are rej
 test("invalid, oversized and incomplete requests are rejected without delivery", async t => {
   const received: any[] = [];
   const listener = await setup(t, value => received.push(value));
-  for (const input of ["oops\n", JSON.stringify({ ...message, deliverAs: "nextTurn" }) + "\n", JSON.stringify({ ...message, extra: true }) + "\n", JSON.stringify({ ...message, replyTo: { transport: "unix", path: "relative" } }) + "\n", "x".repeat(65537), JSON.stringify(message)]) {
+  for (const input of ["oops\n", JSON.stringify({ ...message, deliverAs: "nextTurn" }) + "\n", JSON.stringify({ ...message, extra: true }) + "\n", JSON.stringify({ ...message, replyTo: { transport: "unix", path: "/tmp/reply.sock" } }) + "\n", JSON.stringify({ ...message, from: { id: "sender" } }) + "\n", JSON.stringify({ ...message, version: 1 }) + "\n", JSON.stringify({ ...message, content: "   " }) + "\n", "x".repeat(65537), JSON.stringify(message)]) {
     assert.equal((await request(listener.path, input)).ok, false);
   }
   assert.equal(received.length, 0);
@@ -68,10 +68,10 @@ test("a delivery failure gets a negative ack and may be retried", async t => {
   assert.equal(received[0].deliverAs, "steer");
 });
 
-test("equivalent replyTo key order is deduplicated rather than treated as conflicting", async t => {
+test("equivalent envelope key order and default delivery mode deduplicate", async t => {
   const listener = await setup(t);
   await request(listener.path, JSON.stringify(message) + "\n");
-  const reordered = { ...message, replyTo: { path: "/tmp/reply.sock", transport: "unix" } };
+  const reordered = { content: message.content, id: message.id, type: message.type, version: 2, deliverAs: "followUp" };
   assert.equal((await request(listener.path, JSON.stringify(reordered) + "\n")).status, "duplicate");
 });
 

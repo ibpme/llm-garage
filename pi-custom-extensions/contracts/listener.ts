@@ -8,6 +8,6 @@ export function isListenerEndpoint(value: unknown): value is MessagingEndpoint |
   if (value === null) return true;
   if (!value || typeof value !== "object") return false;
   const e = value as MessagingEndpoint;
-  return e.transport === "unix" && e.protocol === "pi-listener-v1" && typeof e.path === "string" &&
+  return e.transport === "unix" && e.protocol === "pi-listener-v2" && typeof e.path === "string" &&
     e.path.startsWith("/") && !e.path.includes("\0") && Buffer.byteLength(e.path) <= 100;
 }

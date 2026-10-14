@@ -37,18 +37,17 @@ function send(path: string, message: object): Promise<any> {
   });
 }
 
-test("TUI startup advertises socket, delivers sender/reply metadata literally and /listen closes it", async t => {
+test("TUI startup advertises v2 socket, delivers opaque content unchanged and /listen closes it", async t => {
   const h = await setup(t);
   const endpoint = h.endpoints.at(-1);
-  assert.equal(endpoint.protocol, "pi-listener-v1");
+  assert.equal(endpoint.protocol, "pi-listener-v2");
   assert.match(h.statuses.get("message-listener")!, /listening/);
-  const replyTo = { transport: "unix", path: "/tmp/reply.sock" };
-  const ack = await send(endpoint.path, { version: 1, type: "message", id: "one", from: { id: "alice" }, replyTo, content: "/listen off", deliverAs: "steer" });
+  const content = "  Arbitrary text\n{\"from\":\"literal, not metadata\"}\n/listen off  ";
+  const ack = await send(endpoint.path, { version: 2, type: "message", id: "one", content, deliverAs: "steer" });
   assert.equal(ack.ok, true);
   assert.equal(h.messages.length, 1);
-  assert.match(h.messages[0].content, /"id":"alice"/);
-  assert.match(h.messages[0].content, /\/tmp\/reply.sock/);
-  assert.match(h.messages[0].content, /\/listen off$/);
+  assert.equal(h.messages[0].content, content);
+  assert.equal(ack.version, 2);
   assert.deepEqual(h.messages[0].options, { deliverAs: "steer", expandPromptTemplates: false });
   await h.command("");
   assert.equal(h.endpoints.at(-1), null);

@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { LISTENER_CHANGED_EVENT, LISTENER_QUERY_EVENT, LISTENER_STATUS_KEY } from "../contracts/listener.ts";
 import { startListener } from "./listener.ts";
 import type { Listener } from "./listener.ts";
-import { userContent } from "./protocol.ts";
 
 export default function messageListener(pi: ExtensionAPI): void {
   let listener: Listener | undefined;
@@ -12,7 +11,7 @@ export default function messageListener(pi: ExtensionAPI): void {
   let queue = Promise.resolve();
 
   function advertise(): void {
-    pi.events.emit(LISTENER_CHANGED_EVENT, listener ? { transport: "unix", path: listener.path, protocol: "pi-listener-v1" } : null);
+    pi.events.emit(LISTENER_CHANGED_EVENT, listener ? { transport: "unix", path: listener.path, protocol: "pi-listener-v2" } : null);
   }
   const unsubscribe = pi.events.on(LISTENER_QUERY_EVENT, advertise);
   function status(): void {
@@ -30,7 +29,7 @@ export default function messageListener(pi: ExtensionAPI): void {
     try {
       listener = await startListener(message => {
         if (shutdown || !listener) throw new Error("Listener is stopping");
-        pi.sendUserMessage(userContent(message), { deliverAs: message.deliverAs, expandPromptTemplates: false });
+        pi.sendUserMessage(message.content, { deliverAs: message.deliverAs, expandPromptTemplates: false });
       });
       if (shutdown) { await stop(); return; }
       advertise();

@@ -18,7 +18,7 @@ this extension runtime; `/reload` and a new process return to enabled. Session
 replacement closes the old socket and creates a new one if enabled. Disabling
 stops new receipts; it does not cancel messages already handed to Pi.
 
-## Protocol: pi-listener-v1
+## Protocol: pi-listener-v2
 
 Use a Unix-domain socket, **one UTF-8 JSON object followed by a newline per
 connection**. The listener writes one newline-terminated ACK and closes. Requests
@@ -26,46 +26,40 @@ including the newline are limited to 64 KiB. Unknown fields are rejected.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "type": "message",
   "id": "a-unique-message-id",
-  "from": {
-    "id": "sender-agent-id",
-    "name": "Reviewer",
-    "harness": "pi"
-  },
-  "replyTo": {
-    "transport": "unix",
-    "path": "/absolute/path/to/sender.sock"
-  },
   "content": "Please review the latest change.",
   "deliverAs": "followUp"
 }
 ```
 
-- Required: `version`, `type`, `id`, `from.id`, and nonblank string `content`.
-- `id` and sender fields are nonblank strings of at most 256 characters. Use a
-  UUID for the message ID; IDs share one namespace on each listener instance.
-- `from.name` and `from.harness` are optional labels, not verified identities.
-- `replyTo` is optional (or `null`), with an absolute Unix socket path of at most
-  100 UTF-8 bytes. It is **metadata only**: the receiver chooses whether/how to
-  reply. The extension does not connect to it, add a reply tool, or automatically
-  forward model responses. Receivers must validate destinations before replying.
+- Required: `version`, `type`, `id`, and nonblank string `content`.
+- `id` is a nonblank string of at most 256 characters. Use a UUID for the message
+  ID; IDs share one namespace on each listener instance.
+- `content` is opaque text. The listener does not parse, add, authenticate, or
+  format sender metadata; it delivers the string unchanged to Pi. Senders are
+  responsible for any model-facing headers they want to include.
+- `from` and `replyTo` are not transport fields and are rejected. The listener
+  does not connect to a reply endpoint or automatically forward model responses.
 - `deliverAs` is `steer` or `followUp`, defaulting to `followUp`. Both start a turn
   when Pi is idle. While busy, steering is delivered at Pi's next steering
   boundary; follow-ups wait for queued follow-up delivery. Pi's queue settings
   determine whether queued messages are consumed individually or together.
 
-The extension delivers a user message containing a JSON metadata header followed
-by `content`. Metadata is explicitly labeled sender-supplied and unauthenticated,
-so `from`, `replyTo`, and the message ID reach the model alongside the request.
 Slash commands, skill expansion, and prompt-template expansion are disabled for
 socket input; `/listen off` sent as content is literal text, not a local command.
+Even a string that resembles a metadata header is not interpreted by the listener.
+
+This is a coordinated upgrade from v1: old envelopes are rejected rather than
+silently reinterpreted. Reload the listener and publisher, rebuild/restart the
+registry daemon and MCP server, and update manual clients together. The advertised
+protocol becomes `pi-listener-v2`; registry snapshot/publisher versions stay `1`.
 
 ### ACKs and retries
 
 ```json
-{"version":1,"type":"ack","id":"a-unique-message-id","ok":true,"status":"accepted"}
+{"version":2,"type":"ack","id":"a-unique-message-id","ok":true,"status":"accepted"}
 ```
 
 `accepted` means validation succeeded and the extension handed the message to
@@ -80,7 +74,7 @@ bounded retry protection, not exactly-once delivery. A timeout is ambiguous;
 retry with the same ID against the same socket, not a new ID.
 
 ```json
-{"version":1,"type":"ack","id":null,"ok":false,"error":"Invalid JSON"}
+{"version":2,"type":"ack","id":null,"ok":false,"error":"Invalid JSON"}
 ```
 
 Rejected requests use `ok: false` and `error`. `id` is available after envelope
@@ -113,7 +107,7 @@ daemon running, the process snapshot gains:
   "messaging": {
     "transport": "unix",
     "path": "/private/temp/pi-listen-example/in.sock",
-    "protocol": "pi-listener-v1",
+    "protocol": "pi-listener-v2",
     "reportedAt": 1791367205000
   }
 }
@@ -154,9 +148,40 @@ socket.setTimeout(6000, () => socket.destroy(new Error('ACK timeout')));
 socket.on('error', error => { console.error(error.message); process.exitCode = 1; });
 socket.on('data', chunk => process.stdout.write(chunk));
 socket.on('connect', () => socket.end(JSON.stringify({
-  version: 1, type: 'message', id: randomUUID(),
-  from: { id: 'manual-sender' }, content: 'Summarize your current progress.',
+  version: 2, type: 'message', id: randomUUID(),
+  content: 'Summarize your current progress.',
   deliverAs: 'followUp',
 }) + '\n'));
 JS
 ```
+
+## Agents MCP integration
+
+The [`agents-mcp` server](../../agents-mcp/README.md) routes `send_message` to
+this listener using the existing envelope and ACK protocol. `list_agents`
+exposes short opaque process-lifetime addresses (`agt_` + 16 hex characters),
+display names, the caller's `self_agent_id`, and messaging availability.
+Addresses are derived from harness, PID and process start time; the underlying
+identity remains checked for liveness and PID reuse. Names are labels, not
+routing keys.
+
+MCP formats the caller's identity and message ID into the content string:
+
+```text
+External agent message (sender metadata is not authenticated):
+{"sender_id":"agt_6c927c93e66ed4ae","sender_name":"Reviewer","sender_harness":"pi","message_id":"a-unique-message-id"}
+
+Please review the latest change.
+```
+
+`sender_name` is omitted when unavailable. JSON serialization escapes labels so
+newlines in a name cannot inject extra header lines. The body is preserved as
+supplied. The caller is inferred from stdio process ancestry or configured at
+HTTP initialization, never selected by the model in tool arguments. This still
+does not authenticate sender metadata.
+
+To reply, address the content header's `sender_id` with `send_message`, which
+resolves a fresh registry endpoint. No response is automatically sent, and a
+sender without a listener cannot receive replies. `message_id` maps to transport
+`id` and the content header's `message_id`; `deliver_as` maps to `deliverAs`
+(default `followUp`). All metadata formatting belongs to MCP, not this listener.

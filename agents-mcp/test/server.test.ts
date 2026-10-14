@@ -5,7 +5,6 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createAgentsServer } from '../src/server.js';
 
 const calls = [
-  { name: 'send_message', arguments: { agent_id: 'reviewer', message: 'Review this' } },
   { name: 'spawn_agent_task', arguments: { agent_type: 'any-backend', prompt: 'Review this', cwd: '/tmp' } },
   { name: 'spawn_agent', arguments: { agent_type: 'any-backend', prompt: 'Start here' } },
   { name: 'list_agent_tasks', arguments: {} },
@@ -31,7 +30,7 @@ test('discovery exposes the agents interface and session-scoped job descriptions
   assert.equal(connection.client.getServerCapabilities()?.tasks, undefined);
   const { tools } = await connection.client.listTools();
   assert.deepEqual(tools.map(tool => tool.name).sort(), [
-    'agent_task', 'list_agent_tasks', 'send_message', 'spawn_agent', 'spawn_agent_task',
+    'agent_task', 'list_agent_tasks', 'list_agents', 'send_message', 'spawn_agent', 'spawn_agent_task',
   ]);
   for (const tool of tools) {
     assert.equal(tool.inputSchema.type, 'object');
