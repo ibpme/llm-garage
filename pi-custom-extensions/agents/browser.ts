@@ -132,7 +132,7 @@ export function createBrowser(
         body = lines.slice(preview.scroll, preview.scroll + page);
       } else if (detail) {
         const listed = view.agents.some(agent => agentKey(agent) === agentKey(detail!));
-        const lines = detailLines(detail, inner, theme, listed);
+        const lines = detailLines(detail, inner, theme, listed, view.state);
         detailLength = lines.length;
         scroll = Math.max(0, Math.min(scroll, Math.max(0, lines.length - page)));
         body = lines.slice(scroll, scroll + page);
@@ -146,7 +146,7 @@ export function createBrowser(
             const count = view.agents.filter(item => agentGroup(item, deps.origin) === group).length;
             rows.push({ text: theme.fg("accent", theme.bold(` ── ${group} · ${count} ──`)) });
           }
-          rows.push({ index, text: agentRow(agent, index === selected, theme, deps.origin) });
+          rows.push({ index, text: agentRow(agent, index === selected, theme, deps.origin, view.state) });
         });
         const selectedRow = Math.max(0, rows.findIndex(row => row.index === selected));
         offset = Math.max(0, Math.min(offset, selectedRow, Math.max(0, rows.length - page)));

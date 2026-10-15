@@ -41,13 +41,24 @@ export function agentLabel(agent: AgentSnapshot, origin?: Origin): string {
     (isCurrentAgent(agent, origin) ? " (current)" : "") + (!recentAgent(agent) ? " (stale)" : "");
 }
 
-export function agentRow(agent: AgentSnapshot, selected: boolean, theme: Pick<Theme, "fg" | "bold">, origin?: Origin): string {
+function listenerStatus(agent: AgentSnapshot, registryState: RegistryView["state"]): "listening" | "off" | "stale" {
+  if (!agent.messaging) return "off";
+  const reportedAt = agent.messaging.reportedAt;
+  const now = Date.now();
+  return registryState === "stale" || registryState === "unavailable" || !recentAgent(agent) ||
+    reportedAt > now + 5000 || now - reportedAt > 20_000 ? "stale" : "listening";
+}
+
+export function agentRow(agent: AgentSnapshot, selected: boolean, theme: Pick<Theme, "fg" | "bold">, origin?: Origin, registryState: RegistryView["state"] = "fresh"): string {
   const tone = { waiting: "warning", busy: "accent", idle: "success", unknown: "dim" } as const;
   const label = agentLabel(agent, origin);
   const state = `[${agent.activity.state}]`;
   const [before, after] = label.split(state);
+  const listener = listenerStatus(agent, registryState);
+  const listenerBadge = listener === "listening" ? "[listening]" : `[listener ${listener}]`;
+  const listenerTone = listener === "listening" ? "success" : listener === "stale" ? "warning" : "dim";
   return `${theme.fg("accent", selected ? "→" : " ")} ${theme.bold(theme.fg(selected ? "accent" : "text", before))}` +
-    theme.fg(tone[agent.activity.state], state) + theme.fg("muted", after) +
+    theme.fg(tone[agent.activity.state], state) + theme.fg("muted", after) + ` ${theme.fg(listenerTone, listenerBadge)}` +
     ` · ${theme.fg(selected ? "accent" : "muted", agentDescription(agent))}`;
 }
 
@@ -56,11 +67,15 @@ export const agentDescription = (agent: AgentSnapshot): string => clean([
   agent.session.cwd ?? agent.pane?.cwd, agent.activity.waitingFor,
 ].filter(Boolean).join(" · "));
 
-export function detailLines(agent: AgentSnapshot, width: number, theme: Pick<Theme, "fg" | "bold">, listed: boolean): string[] {
+export function detailLines(agent: AgentSnapshot, width: number, theme: Pick<Theme, "fg" | "bold">, listed: boolean, registryState: RegistryView["state"] = "fresh"): string[] {
   const pane = agent.pane;
+  const listener = listenerStatus(agent, listed ? registryState : "stale");
+  const listenerDescription = listener === "listening" ? "advertised (not probed)" :
+    listener === "stale" ? "stale advertisement (not probed)" : "off (not advertised)";
   const fields: Array<[string, string | undefined]> = [
     ["harness", agent.harness], ["PID", String(agent.process.pid)], ["started", new Date(agent.process.startedAt).toISOString()],
     ["observed", new Date(agent.observedAt).toISOString()], ["mode", agent.session.mode],
+    ["listener", listenerDescription],
     ["activity", agent.activity.state], ["activity source", agent.activity.source], ["raw state", agent.activity.rawState],
     ["waiting for", agent.activity.waitingFor], ["session", agent.session.id], ["name", agent.session.name],
     ["session file", agent.session.file], ["cwd", agent.session.cwd ?? pane?.cwd],

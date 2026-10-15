@@ -330,3 +330,70 @@ test("default preview reader follows file-backed messages and does not render af
     assert.equal(renders, before);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("registry listener advertisements update list badges and details without exposing paths", async () => {
+  const { browser, setView } = setup();
+  const messaging = { transport: "unix", protocol: "pi-listener-v2", path: "/tmp/private-listener.sock", reportedAt: Date.now() } as const;
+  setView({ ...fresh(), agents: [{ ...agents[0], messaging }] });
+  await browser.refresh();
+  let text = browser.render(120).join("\n");
+  assert.ok(text.includes("[listening]"));
+  assert.ok(!text.includes(messaging.path));
+  for (const width of [1, 10, 40, 120]) assert.ok(browser.render(width).every(line => visibleWidth(line) <= width));
+  browser.handleInput("i");
+  text = browser.render(120).join("\n");
+  assert.ok(text.includes("listener: advertised (not probed)"));
+  assert.ok(!text.includes(messaging.path));
+  setView({ ...fresh(), agents: [agents[0]] });
+  await browser.refresh();
+  assert.ok(browser.render(120).join("\n").includes("listener: off (not advertised)"));
+  browser.handleInput("\x1b");
+  assert.ok(browser.render(120).join("\n").includes("[listener off]"));
+  browser.dispose();
+});
+
+for (const reason of ["registry", "unavailable", "endpoint", "future", "observation"]) {
+  test(`${reason} staleness does not show a listener as currently listening`, async () => {
+    const { browser, setView } = setup();
+    const at = Date.now();
+    const agent: AgentSnapshot = { ...agents[0], observedAt: reason === "observation" ? at - 31000 : at,
+      messaging: { transport: "unix", protocol: "pi-listener-v2", path: "/tmp/private-listener.sock", reportedAt: reason === "endpoint" ? at - 21000 : reason === "future" ? at + 6000 : at } };
+    setView({ ...fresh(), state: reason === "registry" ? "stale" : reason === "unavailable" ? "unavailable" : "fresh", agents: [agent] });
+    await browser.refresh();
+    const text = browser.render(120).join("\n");
+    assert.ok(text.includes("[listener stale]"));
+    assert.ok(!text.includes("[listening]"));
+    browser.handleInput("i");
+    assert.ok(browser.render(120).join("\n").includes("listener: stale advertisement (not probed)"));
+    browser.dispose();
+  });
+}
+
+test("listener badges follow file-backed registry snapshots and health", async t => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readRegistry } = await import("./reader.ts");
+  const dir = await mkdtemp(join(tmpdir(), "browser-listener-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const at = Date.now();
+  const target: AgentSnapshot = { ...agents[0], observedAt: at,
+    messaging: { transport: "unix", protocol: "pi-listener-v2", path: "/tmp/nonexistent-listener.sock", reportedAt: at } };
+  const health = { version: 1, pid: 456, state: "running", startedAt: at - 10000, updatedAt: at,
+    lastSuccessfulProcessDiscoveryAt: at, agentCount: 1, errors: [] };
+  await writeFile(join(dir, "agents.jsonl"), JSON.stringify(target) + "\n");
+  await writeFile(join(dir, "registry-health.json"), JSON.stringify(health));
+  const browser = createBrowser({ readRegistry: () => readRegistry(dir), performPaneAction: async () => {} },
+    { columns: 120, rows: 30 }, theme, () => {}, () => {});
+  t.after(() => browser.dispose());
+  await browser.refresh();
+  assert.ok(browser.render(120).join("\n").includes("[listening]"));
+  await writeFile(join(dir, "registry-health.json"), JSON.stringify({ ...health, state: "stopped" }));
+  await browser.refresh();
+  assert.ok(browser.render(120).join("\n").includes("[listener stale]"));
+  const { messaging, ...withoutListener } = target;
+  await writeFile(join(dir, "registry-health.json"), JSON.stringify(health));
+  await writeFile(join(dir, "agents.jsonl"), JSON.stringify(withoutListener) + "\n");
+  await browser.refresh();
+  assert.ok(browser.render(120).join("\n").includes("[listener off]"));
+});

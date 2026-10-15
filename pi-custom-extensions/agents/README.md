@@ -66,8 +66,29 @@ Status badges, section headings, selection, and registry health use theme colors
 PID and tmux pane numbers are hidden in the list and remain available in details.
 Selection follows harness + PID + numeric process start
 time, independent of pane moves. Details show process identity, observation time,
-activity and source, session, working directory, model, and tmux server/location.
+activity and source, listener advertisement status, session, working directory,
+model, and tmux server/location.
 Registry strings are sanitized before terminal rendering.
+
+## Listener indicators
+
+Each row includes a listener badge, derived **directly from the registry
+snapshot's `messaging` field**. There is no MCP dependency or socket probe:
+
+| Badge | Meaning |
+|---|---|
+| `[listening]` | A recent listener endpoint is advertised in a usable registry observation |
+| `[listener off]` | No endpoint is advertised; this is not proof that no socket exists |
+| `[listener stale]` | An endpoint is recorded, but its advertisement, agent observation, or registry health is stale |
+
+Details show `listener: advertised (not probed)`, `off (not advertised)`, or
+`stale advertisement (not probed)`. Socket paths are never displayed or dialed.
+The badge updates with the normal two-second browser refresh, including while
+viewing details. Listener advertisements older than 20 seconds (the registry's
+default endpoint TTL) are conservatively marked stale, even if a daemon is
+configured with a longer TTL. Reports more than five seconds in the future are
+also stale. The existing 30-second agent/registry freshness checks still apply.
+A fresh advertisement is not a guarantee of socket reachability.
 
 ## Session preview
 
@@ -158,7 +179,8 @@ spawning infrastructure remains separate; use the `jobs` tool for existing
 job inspection/results/cancellation and the agent-task shortcut for backgrounding.
 
 The old `/diagnostics:claude-endpoints` command and endpoint reader/prober have
-been removed. No messaging socket paths are read, displayed, or dialed.
+been removed. Only canonical registry listener advertisements are consumed; legacy
+endpoint records are not read, and no messaging socket paths are displayed or dialed.
 
 The existing opt-in Claude status-line capture scripts under `scripts/` are
 retained unchanged for compatibility with installed wrappers. They write legacy
